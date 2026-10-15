@@ -31,3 +31,18 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+src/main/resources/application-local.*
+*.pem
+*.key
+
+# Local server binaries and generated data
+nginx-1.18.0/nginx.exe
+nginx-1.18.0/logs/
+nginx-1.18.0/temp/
+*.log
+publish-prep/
