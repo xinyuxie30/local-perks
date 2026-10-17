@@ -5,12 +5,17 @@ import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
+import com.hmdp.dto.ProfileDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
+import com.hmdp.entity.UserInfo;
 import com.hmdp.mapper.UserMapper;
+import com.hmdp.service.IUserInfoService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.UserHolder;
@@ -23,6 +28,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
@@ -51,6 +57,110 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private IUserInfoService userInfoService;
+
+    @Override
+    public Result updateProfile(Long userId, String token, ProfileDTO dto) {
+        if (userId == null) {
+            return Result.fail("请先登录");
+        }
+        if (dto == null) {
+            return Result.fail("参数不能为空");
+        }
+
+        // 1) 昵称：传了才改，空值/超长直接拒绝
+        if (dto.getNickName() != null) {
+            String nickName = StrUtil.trim(dto.getNickName());
+            if (StrUtil.isBlank(nickName)) {
+                return Result.fail("昵称不能为空");
+            }
+            if (nickName.length() > 32) {
+                return Result.fail("昵称最多 32 个字");
+            }
+            User u = new User();
+            u.setId(userId);
+            u.setNickName(nickName);
+            updateById(u);
+            // 同步 Redis 登录态里的昵称（登录态按请求从 token hash 重读，改了 hash 下次 /user/me 即生效）
+            if (StrUtil.isNotBlank(token)) {
+                try {
+                    stringRedisTemplate.opsForHash().put(LOGIN_USER_KEY + token, "nickName", nickName);
+                } catch (Exception e) {
+                    // 同步失败不影响主流程，下次登录自动纠正
+                    log.warn("同步登录态昵称失败", e);
+                }
+            }
+        }
+
+        // 2) 详情字段：局部更新，只有传了的字段才覆盖，避免把没传的字段清空
+        String introduce = dto.getIntroduce() == null ? null : StrUtil.trim(dto.getIntroduce());
+        String city = dto.getCity() == null ? null : StrUtil.trim(dto.getCity());
+        if (introduce != null && introduce.length() > 128) {
+            return Result.fail("个人介绍最多 128 个字");
+        }
+        if (city != null && city.length() > 32) {
+            return Result.fail("城市名称过长");
+        }
+        boolean birthdayProvided = dto.getBirthday() != null;
+        LocalDate birthday = null;
+        if (birthdayProvided && StrUtil.isNotBlank(dto.getBirthday())) {
+            try {
+                birthday = LocalDate.parse(dto.getBirthday().trim());
+            } catch (Exception e) {
+                return Result.fail("生日格式应为 yyyy-MM-dd");
+            }
+        }
+
+        boolean hasInfoChange = introduce != null || city != null || dto.getGender() != null || birthdayProvided;
+        if (!hasInfoChange) {
+            return Result.ok();
+        }
+
+        if (userInfoService.getById(userId) == null) {
+            // 首次建档：直接插入，未传字段留空
+            UserInfo info = new UserInfo();
+            info.setUserId(userId);
+            info.setFans(0);
+            info.setFollowee(0);
+            info.setCredits(0);
+            info.setLevel(false);
+            if (introduce != null) {
+                info.setIntroduce(introduce.isEmpty() ? null : introduce);
+            }
+            if (city != null) {
+                info.setCity(city.isEmpty() ? null : city);
+            }
+            if (dto.getGender() != null) {
+                info.setGender(dto.getGender());
+            }
+            if (birthdayProvided) {
+                info.setBirthday(birthday);
+            }
+            userInfoService.save(info);
+            return Result.ok();
+        }
+
+        // 已有档案：用 UpdateWrapper 显式 set，"传空串 = 清空该字段"才能生效
+        // （updateById 默认忽略 null 字段，无法把已有值清掉）
+        LambdaUpdateWrapper<UserInfo> uw = Wrappers.<UserInfo>lambdaUpdate()
+                .eq(UserInfo::getUserId, userId);
+        if (introduce != null) {
+            uw.set(UserInfo::getIntroduce, introduce.isEmpty() ? null : introduce);
+        }
+        if (city != null) {
+            uw.set(UserInfo::getCity, city.isEmpty() ? null : city);
+        }
+        if (dto.getGender() != null) {
+            uw.set(UserInfo::getGender, dto.getGender());
+        }
+        if (birthdayProvided) {
+            uw.set(UserInfo::getBirthday, birthday);
+        }
+        userInfoService.update(uw);
+        return Result.ok();
+    }
 
     @Override
     public Result sendCode(String phone, HttpSession session) {

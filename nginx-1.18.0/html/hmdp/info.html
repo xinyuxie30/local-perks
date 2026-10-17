@@ -44,6 +44,99 @@
           font-size: 13px;
           text-decoration: none;
       }
+
+      /* 我的评价 */
+      .cmt-item {
+          padding: 12px 4px;
+          border-bottom: 1px solid #f2f2f2;
+          cursor: pointer;
+      }
+      .cmt-item:active { background: #fafafa; }
+      .cmt-head {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          color: #999;
+      }
+      .cmt-shop {
+          color: #ff6633;
+          background: #fff3ee;
+          border-radius: 4px;
+          padding: 1px 6px;
+          flex: 0 0 auto;
+      }
+      .cmt-blog {
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          color: #666;
+      }
+      .cmt-time { flex: 0 0 auto; }
+      .cmt-body {
+          margin-top: 6px;
+          font-size: 13.5px;
+          color: #333;
+          line-height: 1.6;
+          word-break: break-word;
+      }
+      .cmt-foot {
+          margin-top: 7px;
+          font-size: 12px;
+          color: #999;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+      }
+      .cmt-foot img { width: 13px; height: 13px; }
+      .cmt-tag {
+          margin-left: 6px;
+          color: #b0b0b0;
+          border: 1px solid #eee;
+          border-radius: 4px;
+          padding: 0 5px;
+          font-size: 11px;
+      }
+
+      /* 粉丝 / 关注 */
+      .user-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 4px;
+          border-bottom: 1px solid #f2f2f2;
+      }
+      .user-avatar {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          object-fit: cover;
+          flex: 0 0 40px;
+          background: #f5f5f5;
+      }
+      .user-name {
+          flex: 1;
+          min-width: 0;
+          font-size: 14px;
+          color: #333;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+      }
+      .user-act {
+          flex: 0 0 auto;
+          font-size: 12.5px;
+          color: #ff6633;
+          border: 1px solid #ff6633;
+          border-radius: 14px;
+          padding: 3px 12px;
+      }
+      .user-act.on {
+          color: #999;
+          border-color: #e0e0e0;
+      }
   </style>
 
 </head>
@@ -92,19 +185,38 @@
           <a href="/blog-edit.html" class="pane-empty-btn">去写一篇</a>
         </div>
       </el-tab-pane>
-      <el-tab-pane label="评价" name="2">
-        <div class="pane-empty">
-          <div>点评功能即将上线</div>
-          <a href="/index.html" class="pane-empty-btn">先去逛逛</a>
+      <el-tab-pane :label="'评价(' + commentTotal + ')'" name="2">
+        <div v-for="c in comments" :key="c.id" class="cmt-item" @click="toBlogDetail({id: c.blogId})">
+          <div class="cmt-head">
+            <span class="cmt-shop" v-if="c.shopName">{{c.shopName}}</span>
+            <span class="cmt-blog">{{c.blogTitle}}</span>
+            <span class="cmt-time">{{util.formatTime(c.createTime)}}</span>
+          </div>
+          <div class="cmt-body">{{c.content}}</div>
+          <div class="cmt-foot">
+            <img src="/imgs/thumbup.png" alt=""> {{c.liked || 0}}
+            <span class="cmt-tag" v-if="c.parentId">回复</span>
+          </div>
+        </div>
+        <div class="pane-empty" v-if="!comments.length && tabLoaded[2]">
+          <div>还没写过评价</div>
+          <a href="/index.html" class="pane-empty-btn">去逛逛</a>
         </div>
       </el-tab-pane>
-      <el-tab-pane label="粉丝(0)" name="3">
-        <div class="pane-empty">
+      <el-tab-pane :label="'粉丝(' + counts.follower + ')'" name="3">
+        <div v-for="u in fans" :key="u.id" class="user-row">
+          <img class="user-avatar" :src="u.icon || '/imgs/icons/default-icon.png'" alt="" @error="onImgError">
+          <div class="user-name">{{u.nickName || ('用户' + u.id)}}</div>
+          <div class="user-act" :class="{on: u.isFollow}" @click.stop="toggleFollow(u)">
+            {{u.isFollow ? '已关注' : '回关'}}
+          </div>
+        </div>
+        <div class="pane-empty" v-if="!fans.length && tabLoaded[3]">
           <div>还没有粉丝</div>
           <a href="/blog-edit.html" class="pane-empty-btn">发篇笔记涨粉</a>
         </div>
       </el-tab-pane>
-      <el-tab-pane label="关注(0)" name="4">
+      <el-tab-pane :label="'关注(' + counts.followee + ')'" name="4">
         <div class="blog-list" @scroll="onScroll">
           <div class="blog-box" v-for="b in blogs2" :key="b.id">
             <div class="blog-img2" @click="toBlogDetail(b)"><img :src="b.img" alt=""></div>
@@ -144,6 +256,11 @@
       info: {},
       blogs: [],
       blogs2: [], // 关注的人的播客
+      comments: [], // 我的评价
+      commentTotal: 0,
+      fans: [],
+      counts: {followee: 0, follower: 0},
+      tabLoaded: {2: false, 3: false},
       params: {
         minTime: 0, // 上一次拉取到的时间戳
         offset: 0, // 偏移量
@@ -193,6 +310,8 @@
             this.queryUserInfo();
             // 查询用户笔记
             this.queryBlogs();
+            // 关注数 / 粉丝数
+            this.queryCounts();
           })
           .catch(err => {
             location.href = "login.html"
@@ -238,9 +357,77 @@
         axios.post("/user/logout").then(done).catch(done);
       },
       handleClick(r) {
-        if (r.name === '4') {
+        if (r.name === '2') {
+          this.queryMyComments();
+        } else if (r.name === '3') {
+          this.queryFans();
+        } else if (r.name === '4') {
           this.queryBlogsOfFollow(true);
         }
+      },
+      queryCounts() {
+        if (!this.user || !this.user.id) {
+          return;
+        }
+        axios.get("/follow/counts/" + this.user.id)
+          .then(({data}) => {
+            if (data) {
+              this.counts = data;
+            }
+          })
+          .catch(() => {
+            // 计数拿不到只是标签显示 0，不影响其它 tab
+          });
+      },
+      queryMyComments() {
+        if (this.tabLoaded[2]) {
+          return;
+        }
+        axios.get("/blog-comments/of/user", {params: {current: 1}})
+          .then(({data, total}) => {
+            this.comments = data || [];
+            this.commentTotal = total || this.comments.length;
+            this.$set(this.tabLoaded, 2, true);
+          })
+          .catch(() => {
+            this.$set(this.tabLoaded, 2, true);
+          });
+      },
+      queryFans() {
+        if (this.tabLoaded[3]) {
+          return;
+        }
+        axios.get("/follow/fans/" + this.user.id)
+          .then(({data, total}) => {
+            const rows = (data || []).map(u => Object.assign({}, u, {isFollow: false}));
+            this.fans = rows;
+            this.counts.follower = total == null ? rows.length : total;
+            this.$set(this.tabLoaded, 3, true);
+            // 补每行关注态：列表很短，并发拉；失败就当未关注，不挡住列表渲染
+            rows.forEach(u => {
+              axios.get("/follow/or/not/" + u.id)
+                .then(({data: followed}) => {
+                  u.isFollow = !!followed;
+                })
+                .catch(() => {});
+            });
+          })
+          .catch(() => {
+            this.$set(this.tabLoaded, 3, true);
+          });
+      },
+      toggleFollow(u) {
+        const next = !u.isFollow;
+        axios.put("/follow/" + u.id + "/" + next)
+          .then(() => {
+            u.isFollow = next;
+            this.counts.followee += next ? 1 : -1;
+            if (this.counts.followee < 0) {
+              this.counts.followee = 0;
+            }
+            this.$message.success(next ? "已关注" : "已取消关注");
+          })
+          .catch(this.$message.error);
       },
       addLike(b) {
         axios.put("/blog/like/" + b.id)

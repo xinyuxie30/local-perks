@@ -295,6 +295,8 @@
       // 未支付订单持有时间（分钟），由后端 /config/public 下发，避免前后端写死的口径不一致
       holdMinutes: 30,
       nowTs: Date.now(),
+      // 本机时钟与服务端的差值（服务端 - 本机），倒计时统一按校准后的"现在"算
+      clockOffset: 0,
       tickTimer: null,
       autoTimer: null,
       closingExpired: false
@@ -328,15 +330,22 @@
         history.back();
       },
       loadConfig() {
+        const sentAt = Date.now();
         axios.get("/config/public")
           .then(({data}) => {
             if (data && data.orderHoldMinutes) {
               this.holdMinutes = data.orderHoldMinutes;
             }
+            if (data && data.serverTime) {
+              // 用往返中点估算，避免把整段网络耗时都算成时钟偏差
+              const rtt = Date.now() - sentAt;
+              this.clockOffset = data.serverTime + rtt / 2 - Date.now();
+              this.nowTs = Date.now() + this.clockOffset;
+            }
           })
           .catch(() => {
             // 配置拿不到就用默认 30 分钟，不影响主流程
-          })
+          });
       },
       hasUnpaid() {
         return this.orders.some(o => o.status === 1);
@@ -357,7 +366,7 @@
         if (document.hidden) {
           return;
         }
-        this.nowTs = Date.now();
+        this.nowTs = Date.now() + this.clockOffset;
         if (!this.closingExpired && this.orders.some(o => o.status === 1 && this.remainMs(o) <= 0)) {
           // 本地倒计时到点，等后端延迟消息关单后再拉一次
           this.closingExpired = true;

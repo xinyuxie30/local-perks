@@ -64,4 +64,24 @@
         )
         WHERE b.id = #{blogId}
     </update>
+
+    <select id="queryByUser" resultType="com.hmdp.vo.MyCommentVO">
+        SELECT
+            c.`id`          AS id,
+            c.`blog_id`     AS blogId,
+            c.`parent_id`   AS parentId,
+            c.`content`     AS content,
+            c.`liked`       AS liked,
+            c.`create_time` AS createTime,
+            b.`title`       AS blogTitle,
+            b.`images`      AS blogImage,
+            b.`shop_id`     AS shopId,
+            s.`name`        AS shopName
+        FROM tb_blog_comments c
+        INNER JOIN tb_blog b ON b.id = c.blog_id
+        LEFT JOIN tb_shop s ON s.id = b.shop_id
+        WHERE c.user_id = #{userId}
+          AND (c.status IS NULL OR c.status = 0)
+        ORDER BY c.id DESC
+    </select>
 </mapper>

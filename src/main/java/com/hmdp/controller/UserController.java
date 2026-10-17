@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import com.hmdp.annotation.RateLimit;
 import com.hmdp.annotation.RateLimitDimension;
 import com.hmdp.dto.LoginFormDTO;
+import com.hmdp.dto.ProfileDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
@@ -80,6 +81,19 @@ public class UserController {
         info.setUpdateTime(null);
         // 返回
         return Result.ok(info);
+    }
+
+    /**
+     * 更新个人资料（昵称 + 介绍/性别/城市/生日）
+     */
+    @PutMapping("/info")
+    public Result updateInfo(@RequestBody ProfileDTO dto,
+                             @RequestHeader(value = "authorization", required = false) String token) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null) {
+            return Result.fail("请先登录");
+        }
+        return userService.updateProfile(user.getId(), token, dto);
     }
 
     @GetMapping("/{id}")

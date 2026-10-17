@@ -14,6 +14,7 @@ import com.hmdp.service.IBlogService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import com.hmdp.vo.CommentVO;
+import com.hmdp.vo.MyCommentVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -166,6 +167,18 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
             fillLiked(top.getReplies());
         }
         return Result.ok(records, page.getTotal());
+    }
+
+    @Override
+    public Result queryMine(Integer current) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null) {
+            return Result.fail("请先登录");
+        }
+        int pageNo = (current == null || current < 1 || current > SystemConstants.MAX_PAGE_NUMBER) ? 1 : current;
+        Page<MyCommentVO> page = new Page<>(pageNo, SystemConstants.MAX_PAGE_SIZE);
+        getBaseMapper().queryByUser(page, user.getId());
+        return Result.ok(page.getRecords(), page.getTotal());
     }
 
     @Override

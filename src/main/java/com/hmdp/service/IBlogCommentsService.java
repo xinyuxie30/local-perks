@@ -26,4 +26,9 @@ public interface IBlogCommentsService extends IService<BlogComments> {
      * 评论点赞/取消点赞
      */
     Result likeComment(Long id);
+
+    /**
+     * 个人中心的「我的评价」分页（当前登录用户）
+     */
+    Result queryMine(Integer current);
 }
