@@ -10,7 +10,15 @@
   <link href="./css/info.css" rel="stylesheet">
 
   <style type="text/css">
-
+    .info-item { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    .info-item:active { background: #fafafa; }
+    .picker-dialog .el-dialog__body { padding: 10px 20px 20px; }
+    .gender-row { display: flex; gap: 12px; margin-top: 6px; }
+    .gender-btn {
+      flex: 1; height: 40px; line-height: 40px; text-align: center;
+      border: 1px solid #dcdfe6; border-radius: 20px; color: #606266;
+    }
+    .gender-btn.active { border-color: #ff6633; color: #ff6633; background: #fff5f0; }
   </style>
 </head>
 <body>
@@ -29,36 +37,32 @@
         </div>
       </div>
       <div class="divider"></div>
-      <div class="info-item">
+      <div class="info-item" @click="editNickname">
         <div class="info-label">昵称</div>
         <div class="info-btn">
           <div>{{user.nickName}}</div>
-          <div>
-            <i class="el-icon-arrow-right"></i>
-          </div>
-        </div>
-      </div>
-      <div class="divider"></div>
-      <div class="info-item">
-        <div class="info-label">个人介绍</div>
-        <div class="info-btn">
-          <div style="overflow: hidden; width: 150px;text-align: right">{{info.introduce || '介绍一下自己'}}</div>
-          <div>
-            <i class="el-icon-arrow-right"></i>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="info-box">
-      <div class="info-item">
-        <div class="info-label">性别</div>
-        <div class="info-btn">
-          <div>{{info.gender || '选择'}}</div>
           <div><i class="el-icon-arrow-right"></i></div>
         </div>
       </div>
       <div class="divider"></div>
-      <div class="info-item">
+      <div class="info-item" @click="editIntroduce">
+        <div class="info-label">个人介绍</div>
+        <div class="info-btn">
+          <div style="overflow: hidden; width: 150px;text-align: right">{{info.introduce || '介绍一下自己'}}</div>
+          <div><i class="el-icon-arrow-right"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="info-box">
+      <div class="info-item" @click="openGender">
+        <div class="info-label">性别</div>
+        <div class="info-btn">
+          <div>{{genderText}}</div>
+          <div><i class="el-icon-arrow-right"></i></div>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="info-item" @click="editCity">
         <div class="info-label">城市</div>
         <div class="info-btn">
           <div>{{info.city || '选择'}}</div>
@@ -66,7 +70,7 @@
         </div>
       </div>
       <div class="divider"></div>
-      <div class="info-item">
+      <div class="info-item" @click="editBirthday">
         <div class="info-label">生日</div>
         <div class="info-btn">
           <div>{{info.birthday || '添加'}}</div>
@@ -93,6 +97,22 @@
       </div>
     </div>
   </div>
+
+  <!-- 性别/生日选择弹窗 -->
+  <el-dialog title="选择性别" :visible.sync="genderVisible" width="80%" class="picker-dialog" append-to-body>
+    <div class="gender-row">
+      <div class="gender-btn" :class="{active: genderValue === false}" @click="chooseGender(false)">男</div>
+      <div class="gender-btn" :class="{active: genderValue === true}" @click="chooseGender(true)">女</div>
+    </div>
+  </el-dialog>
+  <el-dialog title="选择生日" :visible.sync="birthdayVisible" width="80%" class="picker-dialog" append-to-body>
+    <el-date-picker v-model="birthdayValue" type="date" placeholder="选择日期"
+                    value-format="yyyy-MM-dd" :picker-options="birthdayOptions" style="width: 100%"></el-date-picker>
+    <div style="text-align: right; margin-top: 12px">
+      <el-button size="mini" @click="birthdayVisible = false">取消</el-button>
+      <el-button size="mini" type="primary" @click="confirmBirthday">确定</el-button>
+    </div>
+  </el-dialog>
   <foot-bar :active-btn="4"></foot-bar>
 </div>
 <script src="./js/vue.js"></script>
@@ -106,30 +126,116 @@
   const app = new Vue({
     el: "#app",
     data: {
-      user: "",
+      util,
+      user: {},
       info: {},
+      genderVisible: false,
+      genderValue: null,
+      birthdayVisible: false,
+      birthdayValue: "",
+      birthdayOptions: {
+        disabledDate(time) {
+          return time.getTime() > Date.now();
+        }
+      },
+      saving: false
+    },
+    computed: {
+      genderText() {
+        if (this.info.gender === true) return "女";
+        if (this.info.gender === false) return "男";
+        return "未设置";
+      }
     },
     created() {
       this.checkLogin();
     },
     methods: {
       checkLogin() {
-        // 查询用户信息
         axios.get("/user/me")
-        .then(({data}) => {
-          this.user = data;
-          this.info = JSON.parse(sessionStorage.getItem("userInfo")) || {}
-        })
-        .catch(err => {
-          this.$message.error(err);
-          setTimeout(() => location.href = "login.html", 1000)
-        })
+          .then(({data}) => {
+            this.user = data;
+            this.info = JSON.parse(sessionStorage.getItem("userInfo")) || {};
+            // 本地没有缓存（比如从别处进入），兜底拉一次详情
+            if (!this.info.userId) {
+              this.queryInfo();
+            }
+          })
+          .catch(err => {
+            this.$message.error(err);
+            setTimeout(() => location.href = "login.html", 1000);
+          })
       },
-      goBack(){
+      queryInfo() {
+        axios.get("/user/info/" + this.user.id)
+          .then(({data}) => {
+            this.info = data || {};
+            if (data) {
+              sessionStorage.setItem("userInfo", JSON.stringify(data));
+            }
+          })
+          .catch(() => {})
+      },
+      editNickname() {
+        this.$prompt("请输入新昵称", "修改昵称", {
+          inputValue: this.user.nickName,
+          inputPattern: /^\S.{0,31}$/,
+          inputErrorMessage: "昵称 1~32 个字"
+        }).then(({value}) => this.save({nickName: value}))
+          .catch(() => {});
+      },
+      editIntroduce() {
+        this.$prompt("介绍一下自己吧（128 字内）", "个人介绍", {
+          inputValue: this.info.introduce || "",
+          inputType: "textarea",
+          inputValidator: v => (!v || v.length <= 128) || "最多 128 个字"
+        }).then(({value}) => this.save({introduce: value}))
+          .catch(() => {});
+      },
+      editCity() {
+        this.$prompt("所在城市", "修改城市", {
+          inputValue: this.info.city || "",
+          inputValidator: v => (!v || v.length <= 32) || "城市名过长"
+        }).then(({value}) => this.save({city: value}))
+          .catch(() => {});
+      },
+      openGender() {
+        this.genderValue = this.info.gender === null || this.info.gender === undefined ? null : this.info.gender;
+        this.genderVisible = true;
+      },
+      chooseGender(v) {
+        this.genderValue = v;
+        this.genderVisible = false;
+        this.save({gender: v});
+      },
+      editBirthday() {
+        this.birthdayValue = this.info.birthday || "";
+        this.birthdayVisible = true;
+      },
+      confirmBirthday() {
+        this.birthdayVisible = false;
+        this.save({birthday: this.birthdayValue || null});
+      },
+      save(patch) {
+        if (this.saving) {
+          return;
+        }
+        this.saving = true;
+        axios.put("/user/info", patch)
+          .then(() => {
+            this.$message.success("已保存");
+            if (patch.nickName) {
+              this.user.nickName = patch.nickName;
+            }
+            this.queryInfo();
+          })
+          .catch(err => this.$message.error(err))
+          .finally(() => this.saving = false);
+      },
+      goBack() {
         history.back();
       }
-    },
-
+    }
   })
 </script>
 <script src="/js/assistant-entry.js"></script>

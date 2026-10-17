@@ -34,6 +34,14 @@ public class BlogCommentsController {
     }
 
     /**
+     * 个人中心的「我的评价」分页：评论 + 所属笔记与店铺
+     */
+    @GetMapping("/of/user")
+    public Result queryMine(@RequestParam(value = "current", defaultValue = "1") Integer current) {
+        return blogCommentsService.queryMine(current);
+    }
+
+    /**
      * 一级评论分页，每条附带前 3 条回复与回复总数
      */
     @GetMapping("/of/blog/{blogId}")

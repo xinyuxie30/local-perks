@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.hmdp.entity.BlogComments;
 import com.hmdp.vo.CommentVO;
+import com.hmdp.vo.MyCommentVO;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -29,4 +30,9 @@ public interface BlogCommentsMapper extends BaseMapper<BlogComments> {
      * 按当前可见评论重算 tb_blog.comments，删除评论后用它校正计数
      */
     int refreshBlogCommentCount(@Param("blogId") Long blogId);
+
+    /**
+     * 个人中心的「我的评价」分页：联表取出笔记标题、封面与所属店铺
+     */
+    IPage<MyCommentVO> queryByUser(IPage<MyCommentVO> page, @Param("userId") Long userId);
 }

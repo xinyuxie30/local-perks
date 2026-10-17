@@ -20,9 +20,9 @@ public class UserInfo implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 主键，用户id
+     * 主键，用户id（与 tb_user.id 一致，非自增，须由业务显式赋值）
      */
-    @TableId(value = "user_id", type = IdType.AUTO)
+    @TableId(value = "user_id", type = IdType.INPUT)
     private Long userId;
 
     /**

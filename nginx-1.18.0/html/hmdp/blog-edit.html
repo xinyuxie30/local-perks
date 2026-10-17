@@ -10,7 +10,21 @@
   <link href="./css/blog-edit.css" rel="stylesheet">
 
   <style type="text/css">
-
+    .upload-box { flex-wrap: wrap; }
+    .pic-box { position: relative; }
+    .pic-box .pic-del {
+      position: absolute; right: -6px; top: -6px;
+      width: 18px; height: 18px; line-height: 17px; text-align: center;
+      border-radius: 50%; background: rgba(0, 0, 0, .6); color: #fff; font-size: 12px;
+    }
+    .counter {
+      text-align: right; font-size: 11px; color: #bbb; padding: 2px 14px 6px 0;
+    }
+    .counter.warn { color: #ff6633; }
+    .header-commit-btn.disabled { opacity: .55; }
+    .shop-picked { color: #333; }
+    .shop-clear { color: #999; font-size: 12px; margin-left: 8px; }
+    .upload-tip { width: 100%; font-size: 11px; color: #bbb; padding: 4px 0 0 2px; }
   </style>
 </head>
 <body>
@@ -19,32 +33,40 @@
     <div class="header-cancel-btn" @click="goBack">取消</div>
     <div class="header-title">&nbsp;&nbsp;发笔记<i class="el-icon-info"></i></div>
     <div class="header-commit">
-      <div class="header-commit-btn" @click="submitBlog">发布</div>
+      <div class="header-commit-btn" :class="{disabled: submitting}" @click="submitBlog">
+        {{submitting ? '发布中' : '发布'}}
+      </div>
     </div>
   </div>
   <div class="upload-box">
-    <input type="file" @change="fileSelected" name="file" ref="fileInput" style="display: none">
-    <div class="upload-btn" @click="openFileDialog">
+    <input type="file" accept="image/png,image/jpeg,image/webp" @change="fileSelected" name="file"
+           ref="fileInput" style="display: none">
+    <div class="upload-btn" v-if="fileList.length < maxImages" @click="openFileDialog">
       <i class="el-icon-camera"></i>
       <div style="font-size: 12px;line-height: 12px">上传照片</div>
     </div>
     <div class="pic-list">
       <div class="pic-box" v-for="(f,i) in fileList" :key="i">
         <img :src="f" alt="">
-        <i class="el-icon-close" @click="deletePic(i)"></i>
+        <i class="el-icon-close pic-del" @click="deletePic(i)"></i>
       </div>
     </div>
+    <div class="upload-tip">最多 {{maxImages}} 张，单张不超过 5MB；未发布的图片不会上传到笔记</div>
   </div>
   <div class="blog-title">
-    <input v-model="params.title" type="text" placeholder="填写标题更容易上首页哦~">
+    <input v-model="params.title" type="text" maxlength="60" placeholder="填写标题更容易上首页哦~">
   </div>
   <div class="blog-content">
-    <textarea v-model="params.content" placeholder="最近打卡了什么地方，有什么新奇体验呢？"></textarea>
+    <textarea v-model="params.content" maxlength="2048" placeholder="最近打卡了什么地方，有什么新奇体验呢？"></textarea>
+    <div class="counter" :class="{warn: contentLen > 1900}">{{contentLen}}/2048</div>
   </div>
   <div class="divider"></div>
   <div class="blog-shop" @click="showDialog=true">
     <div class="shop-left">关联商户</div>
-    <div v-if="selectedShop.name">{{selectedShop.name}}</div>
+    <div v-if="selectedShop.id" class="shop-picked">
+      {{selectedShop.name}}
+      <span class="shop-clear" @click.stop="selectedShop = {}">清除</span>
+    </div>
     <div v-else>去选择&nbsp;<i class="el-icon-arrow-right"></i></div>
   </div>
   <div class="mask" v-show="showDialog" @click="showDialog=false"></div>
@@ -58,13 +80,16 @@
         <div class="city-select">杭州 <i class="el-icon-arrow-down"></i></div>
         <div class="search-input">
           <i class="el-icon-search" @click="queryShops"></i>
-          <input v-model="shopName" type="text" placeholder="搜索商户名称">
+          <input v-model="shopName" type="text" placeholder="搜索商户名称" @keyup.enter="queryShops">
         </div>
       </div>
       <div class="shop-list">
-        <div v-for="s in shops" class="shop-item" @click="selectShop(s)">
+        <div v-for="s in shops" :key="s.id" class="shop-item" @click="selectShop(s)">
           <div class="shop-name">{{s.name}}</div>
           <div>{{s.area}}</div>
+        </div>
+        <div v-if="!shops.length" style="text-align:center;color:#999;font-size:13px;padding:24px 0">
+          {{shopLoading ? '搜索中…' : '没有找到相关商户'}}
         </div>
       </div>
     </div>
@@ -83,12 +108,21 @@
     data() {
       return {
         util,
-        fileList: [], // 文件列表
-        params: {},
-        showDialog: false, //
-        shops: [], // 商户信息
-        shopName: "", //商户名称
+        fileList: [], // 已上传图片地址
+        params: {title: "", content: ""},
+        showDialog: false,
+        shops: [], // 商户候选
+        shopName: "", // 搜索关键字
+        shopLoading: false,
         selectedShop: {}, // 选中的商户
+        submitting: false,
+        maxImages: 9,
+        maxSize: 5 * 1024 * 1024
+      }
+    },
+    computed: {
+      contentLen() {
+        return (this.params.content || "").length;
       }
     },
     created() {
@@ -97,41 +131,85 @@
     },
     methods: {
       queryShops() {
-        axios.get("/shop/of/name?name=" + this.shopName)
-          .then(({data}) => this.shops = data)
-          .catch(this.$message.error)
+        this.shopLoading = true;
+        // 走 params 让 axios 负责编码，中文/空格不会拼坏
+        axios.get("/shop/of/name", {params: {name: this.shopName, current: 1}})
+          .then(({data}) => this.shops = data || [])
+          .catch(err => {
+            this.shops = [];
+            this.$message.error(err);
+          })
+          .finally(() => this.shopLoading = false)
       },
       selectShop(s) {
         this.selectedShop = s;
         this.showDialog = false;
       },
       submitBlog() {
-        let {...data} = this.params;
-        data.images = this.fileList.join(",");
-        data.shopId = this.selectedShop.id;
+        if (this.submitting) {
+          return;
+        }
+        const content = (this.params.content || "").trim();
+        if (!content) {
+          this.$message.warning("写点内容再发布吧");
+          return;
+        }
+        if (content.length > 2048) {
+          this.$message.warning("正文最多 2048 字");
+          return;
+        }
+        this.submitting = true;
+        const data = {
+          title: (this.params.title || "").trim(),
+          content: content,
+          images: this.fileList.join(","),
+          shopId: this.selectedShop.id
+        };
         axios.post("/blog", data)
-          .then(resp => location.href = "/info.html")
-          .catch(this.$message.error)
+          .then(() => {
+            this.$message.success("发布成功");
+            setTimeout(() => location.href = "/info.html", 500);
+          })
+          .catch(err => {
+            this.$message.error(err);
+            this.submitting = false;
+          })
       },
       openFileDialog() {
+        // 清空 value，否则连续选同一张图不会再触发 change
+        this.$refs.fileInput.value = "";
         this.$refs.fileInput.click();
       },
       fileSelected() {
-        let file = this.$refs.fileInput.files[0];
-        let formData = new FormData();
+        const input = this.$refs.fileInput;
+        const file = input.files && input.files[0];
+        if (!file) {
+          return;
+        }
+        if (!/^image\/(png|jpeg|jpg|webp)$/.test(file.type)) {
+          this.$message.warning("只支持 jpg/png/webp 图片");
+          return;
+        }
+        if (file.size > this.maxSize) {
+          this.$message.warning("图片不能超过 5MB");
+          return;
+        }
+        if (this.fileList.length >= this.maxImages) {
+          this.$message.warning("最多上传 " + this.maxImages + " 张");
+          return;
+        }
+        const formData = new FormData();
         formData.append("file", file);
-        const config = {
-          headers: {"Content-Type": "multipart/form-data;boundary=" + new Date().getTime()}
-        };
-        axios
-          .post("/upload/blog", formData, config)
+        // 不要手动设置 Content-Type：浏览器需要自己带 boundary
+        axios.post("/upload/blog", formData, {timeout: 20000})
           .then(({data}) => this.fileList.push('/imgs' + data))
-          .catch(this.$message.error);
+          .catch(err => this.$message.error(err))
+          .finally(() => input.value = "");
       },
       deletePic(i) {
-        axios.get("/upload/blog/delete?name=" + this.fileList[i])
-          .then(() => this.fileList.splice(i, 1))
-          .catch(this.$message.error)
+        // 删除服务端文件需要管理员权限（防止越权删别人的图），这里只从本次草稿移除，
+        // 未发布笔记引用的图片由运维按 upload 目录清理。
+        this.fileList.splice(i, 1);
       },
       checkLogin() {
         // 获取token

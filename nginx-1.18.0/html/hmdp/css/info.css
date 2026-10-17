@@ -230,3 +230,33 @@
     height: 75%;
     margin-right: 2px;
 }
+
+/* 笔记列表项可点击 + 空态（info / other-info 共用） */
+.blog-item {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.blog-item:active {
+    background: #fafafa;
+}
+.pane-empty {
+    text-align: center;
+    color: #999;
+    font-size: 13px;
+    padding: 60px 20px;
+}
+.pane-empty-btn {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 7px 20px;
+    border-radius: 16px;
+    background: #ff6633;
+    color: #fff;
+    font-size: 13px;
+    text-decoration: none;
+}
+.pane-sub {
+    font-size: 12px;
+    color: #999;
+    padding: 6px 0;
+}

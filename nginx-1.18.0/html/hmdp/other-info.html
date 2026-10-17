@@ -31,7 +31,7 @@
 <div id="app">
   <div class="header">
     <div class="header-back-btn" @click="goBack"><i class="el-icon-arrow-left"></i></div>
-    <div class="header-title">&nbsp;&nbsp;&nbsp;</div>
+    <div class="header-title">{{user.nickName || ''}}</div>
   </div>
   <div class="basic">
     <div class="basic-icon">
@@ -46,23 +46,26 @@
     </div>
   </div>
   <div class="introduce">
-    <span v-if="info.introduce"></span>
+    <span v-if="info.introduce">{{info.introduce}}</span>
     <span v-else>这个人很懒，什么都没有留下</span>
   </div>
   <div class="content">
     <el-tabs v-model="activeName" @tab-click="handleClick">
       <el-tab-pane label="笔记" name="1">
-        <div v-for="b in blogs" :key="b.id" class="blog-item">
-          <div class="blog-img"><img :src="b.images.split(',')[0]" alt=""></div>
+        <div v-for="b in blogs" :key="b.id" class="blog-item" @click="toBlogDetail(b)">
+          <div class="blog-img">
+            <img :src="util.firstImage(b.images) || '/imgs/icons/default-icon.png'" alt="" @error="onImgError">
+          </div>
           <div class="blog-info">
-            <div class="blog-title" v-html="b.title"></div>
+            <div class="blog-title">{{b.title}}</div>
             <div class="blog-liked"><img src="/imgs/thumbup.png" alt=""> {{b.liked}}</div>
             <div class="blog-comments"><i class="el-icon-chat-dot-round"></i> {{b.comments}}</div>
           </div>
         </div>
+        <div class="pane-empty" v-if="!blogs.length">TA 还没有发布笔记</div>
       </el-tab-pane>
       <el-tab-pane label="共同关注" name="2">
-        <div>你们都关注了：</div>
+        <div class="pane-sub" v-if="commonFollows.length">你们都关注了：</div>
         <div class="follow-info" v-for="u in commonFollows" :key="u.id">
           <div class="follow-info-icon" @click="toOtherInfo(u.id)">
             <img :src="u.icon || '/imgs/icons/default-icon.png'" alt="">
@@ -74,6 +77,7 @@
               去主页看看
           </div>
         </div>
+        <div class="pane-empty" v-if="!commonFollows.length && !commonLoading">还没有共同关注的人</div>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -97,6 +101,7 @@
       blogs: [],
       followed: false, // 是否关注了
       commonFollows: [], // 共同关注
+      commonLoading: false,
     },
     created() {
       this.queryUser();
@@ -159,11 +164,13 @@
           .catch(this.$message.error)
       },
       queryCommonFollow() {
+        this.commonLoading = true;
         axios.get("/follow/common/" + this.user.id)
-          .then(({data}) => this.commonFollows = data)
+          .then(({data}) => this.commonFollows = data || [])
           .catch(err => {
             this.$message.error(err);
           })
+          .finally(() => this.commonLoading = false)
       },
       follow() {
         axios.put("/follow/" + this.user.id + "/" + !this.followed)
@@ -180,6 +187,12 @@
       },
       toOtherInfo(id){
         location.href = "/other-info.html?id=" + id
+      },
+      toBlogDetail(b) {
+        location.href = "/blog-detail.html?id=" + b.id;
+      },
+      onImgError(e) {
+        util.imgFallback(e);
       }
     },
 
