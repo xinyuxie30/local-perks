@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+<title>智能客服 · 智惠生活通</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; background: #f2f3f5; color: #333; }
+  #app { max-width: 720px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; background: #f2f3f5; }
+  .cs-header { padding: 14px 18px; background: #fff; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 5; }
+  .cs-logo { width: 34px; height: 34px; border-radius: 50%; background: #ff6633; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex: 0 0 34px; }
+  .cs-title { font-size: 16px; font-weight: 600; }
+  .cs-sub { font-size: 12px; color: #999; margin-top: 2px; }
+  .cs-status { margin-left: auto; font-size: 12px; color: #52c41a; display: flex; align-items: center; gap: 5px; }
+  .cs-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #52c41a; display: inline-block; }
+  .cs-list { flex: 1; overflow-y: auto; padding: 16px 14px 8px; }
+  .cs-row { display: flex; margin-bottom: 14px; align-items: flex-start; gap: 8px; }
+  .cs-row.user { flex-direction: row-reverse; }
+  .cs-avatar { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 34px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .cs-avatar.bot { background: #fff2ec; color: #ff6633; border: 1px solid #ffd9c9; }
+  .cs-avatar.user { background: #e6f1fb; color: #378add; border: 1px solid #c5e0f7; }
+  .cs-bubble { max-width: 76%; padding: 10px 13px; border-radius: 12px; font-size: 14px; line-height: 1.65; word-break: break-word; }
+  .cs-bubble.bot { background: #fff; border: 1px solid #eee; border-top-left-radius: 4px; }
+  .cs-bubble.user { background: #ff6633; color: #fff; border-top-right-radius: 4px; }
+  .cs-meta { font-size: 11px; color: #bbb; margin-top: 5px; }
+  .cs-typing { display: inline-flex; gap: 4px; padding: 4px 0; }
+  .cs-typing i { width: 6px; height: 6px; border-radius: 50%; background: #ff6633; opacity: .35; animation: blink 1.2s infinite; }
+  .cs-typing i:nth-child(2) { animation-delay: .2s; }
+  .cs-typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .cs-suggest { display: flex; gap: 8px; padding: 0 14px 10px; flex-wrap: wrap; }
+  .cs-chip { font-size: 12px; color: #ff6633; background: #fff2ec; border: 1px solid #ffd9c9; padding: 6px 12px; border-radius: 16px; cursor: pointer; }
+  .cs-chip:hover { background: #ffe7db; }
+  .cs-inputbar { padding: 10px 14px 14px; background: #fff; border-top: 1px solid #eee; display: flex; gap: 10px; }
+  .cs-input { flex: 1; border: 1px solid #e5e5e5; border-radius: 10px; padding: 10px 12px; font-size: 14px; resize: none; height: 44px; outline: none; font-family: inherit; }
+  .cs-input:focus { border-color: #ff6633; }
+  .cs-send { width: 84px; border: none; border-radius: 10px; background: #ff6633; color: #fff; font-size: 15px; cursor: pointer; }
+  .cs-send:disabled { background: #ffc2a8; cursor: not-allowed; }
+  .cs-welcome { text-align: center; color: #999; font-size: 12px; padding: 8px 0 14px; }
+  .cs-approve { margin-top: 8px; display: flex; gap: 8px; }
+  .cs-approve button { padding: 6px 18px; border-radius: 16px; border: 1px solid #ffd9c9; font-size: 13px; cursor: pointer; }
+  .cs-approve-yes { background: #ff6633; color: #fff; border-color: #ff6633 !important; }
+  .cs-approve-no { background: #fff; color: #666; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="cs-header">
+    <div class="cs-logo">客服</div>
+    <div>
+      <div class="cs-title">智惠生活通 · 智能客服</div>
+      <div class="cs-sub">Agent 工具调用 · 由 EchoMind 驱动</div>
+    </div>
+    <div class="cs-status">在线</div>
+  </div>
+  <div class="cs-list" id="csList">
+    <div class="cs-welcome">你好，我是智惠生活通智能客服，可以帮你查店铺、查优惠券、查订单、抢秒杀券，也能解答登录、签到、退款等问题～</div>
+  </div>
+  <div class="cs-suggest" id="csSuggest">
+    <div class="cs-chip">秒杀券怎么抢？</div>
+    <div class="cs-chip">附近有什么好店？</div>
+    <div class="cs-chip">我的订单怎么查？</div>
+    <div class="cs-chip">签到有什么用？</div>
+  </div>
+  <div class="cs-inputbar">
+    <textarea id="csInput" class="cs-input" placeholder="输入你的问题，回车发送（Shift+回车换行）"></textarea>
+    <button id="csSend" class="cs-send">发送</button>
+  </div>
+</div>
+<script>
+(function () {
+  var listEl = document.getElementById('csList');
+  var inputEl = document.getElementById('csInput');
+  var sendEl = document.getElementById('csSend');
+  var state = {
+    conversationId: 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    userId: 'guest',
+    authToken: null,
+    busy: false
+  };
+
+  function esc(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function fmt(text) {
+    return esc(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+  }
+  function scrollBottom() { listEl.scrollTop = listEl.scrollHeight; }
+
+  function addMsg(role, text, meta) {
+    var row = document.createElement('div');
+    row.className = 'cs-row ' + role;
+    var avatar = '<div class="cs-avatar ' + role + '">' + (role === 'user' ? '我' : 'AI') + '</div>';
+    var metaHtml = meta ? '<div class="cs-meta">' + esc(meta) + '</div>' : '';
+    row.innerHTML = avatar + '<div><div class="cs-bubble ' + role + '">' + fmt(text) + '</div>' + metaHtml + '</div>';
+    listEl.appendChild(row);
+    scrollBottom();
+    return row;
+  }
+  function addTyping() {
+    var row = document.createElement('div');
+    row.className = 'cs-row bot';
+    row.innerHTML = '<div class="cs-avatar bot">AI</div><div class="cs-bubble bot"><span class="cs-typing"><i></i><i></i><i></i></span></div>';
+    listEl.appendChild(row);
+    scrollBottom();
+    return row;
+  }
+  function setBusy(busy) {
+    state.busy = busy;
+    sendEl.disabled = busy;
+    sendEl.textContent = busy ? '回复中' : '发送';
+  }
+  function metaOf(data) {
+    var parts = [];
+    if (data.tools_used && data.tools_used.length) { parts.push('工具: ' + data.tools_used.join(', ')); }
+    if (data.latency_ms != null) { parts.push(data.latency_ms + ' ms'); }
+    return parts.length ? 'AI 客服 · ' + parts.join(' · ') : 'AI 客服';
+  }
+
+  async function send(text) {
+    text = (text || '').trim();
+    if (!text || state.busy) { return; }
+    setBusy(true);
+    addMsg('user', text);
+    inputEl.value = '';
+    var typingRow = addTyping();
+    try {
+      var resp = await fetch('/cs-api/chat/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          user_id: state.userId,
+          conversation_id: state.conversationId,
+          auth_token: state.authToken
+        })
+      });
+      if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+      var data = await resp.json();
+      typingRow.remove();
+      if (data.requires_approval) {
+        showApproval(data);
+      } else {
+        addMsg('bot', data.response || '（暂时没有回复内容）', metaOf(data));
+      }
+    } catch (err) {
+      typingRow.remove();
+      addMsg('bot', '抱歉，智能客服暂时不可用（' + err.message + '）。请确认服务已启动后重试。');
+    } finally {
+      setBusy(false);
+      inputEl.focus();
+    }
+  }
+
+  function showApproval(data) {
+    var row = document.createElement('div');
+    row.className = 'cs-row bot';
+    var html = '<div class="cs-avatar bot">AI</div><div>';
+    html += '<div class="cs-bubble bot">' + fmt(data.response) + '</div>';
+    html += '<div class="cs-approve">';
+    html += '<button class="cs-approve-yes">确认</button>';
+    html += '<button class="cs-approve-no">取消</button>';
+    html += '</div></div>';
+    row.innerHTML = html;
+    listEl.appendChild(row);
+    scrollBottom();
+    var yes = row.querySelector('.cs-approve-yes');
+    var no = row.querySelector('.cs-approve-no');
+    yes.addEventListener('click', function () { approve(data.pending_token, true, row); });
+    no.addEventListener('click', function () { approve(data.pending_token, false, row); });
+  }
+
+  async function approve(token, approved, row) {
+    var btnBox = row.querySelector('.cs-approve');
+    if (btnBox) { btnBox.remove(); }
+    var typing = addTyping();
+    try {
+      var resp = await fetch('/cs-api/chat/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: state.conversationId, pending_token: token, approved: approved, auth_token: state.authToken })
+      });
+      if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+      var data = await resp.json();
+      typing.remove();
+      addMsg('bot', data.response || '（已处理）', metaOf(data));
+    } catch (err) {
+      typing.remove();
+      addMsg('bot', '操作处理失败（' + err.message + '）。');
+    }
+  }
+
+  sendEl.addEventListener('click', function () { send(inputEl.value); });
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(inputEl.value); }
+  });
+  document.getElementById('csSuggest').addEventListener('click', function (e) {
+    if (e.target && e.target.classList.contains('cs-chip')) { send(e.target.textContent); }
+  });
+
+  // 用本地登录态作为客服侧身份：token 透传给业务工具，userId 用于记忆隔离
+  (function resolveUser() {
+    try {
+      var token = localStorage.getItem('token');
+      if (!token) { return; }
+      state.authToken = token;
+      fetch('/api/user/me', { headers: { authorization: token } })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j && j.data && j.data.id != null) { state.userId = 'u' + j.data.id; }
+        })
+        .catch(function () {});
+    } catch (e) {}
+  })();
+
+  inputEl.focus();
+})();
+</script>
+</body>
+</html>

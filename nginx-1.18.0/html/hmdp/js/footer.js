@@ -13,8 +13,8 @@ Vue.component("footBar", {
       <img class="add-btn" src="/imgs/add.png" alt="">
     </div>
     <div class="foot-box" :class="{active: activeBtn === 3}" @click="toPage(3)">
-      <div class="foot-view"><i class="el-icon-chat-dot-round"></i></div>
-      <div class="foot-text">消息</div>
+      <div class="foot-view"><i class="el-icon-tickets"></i></div>
+      <div class="foot-text">订单</div>
     </div>
     <div class="foot-box" :class="{active: activeBtn === 4}" @click="toPage(4)">
       <div class="foot-view"><i class="el-icon-user"></i></div>
@@ -33,6 +33,8 @@ Vue.component("footBar", {
         location.href = "/blog-edit.html"
       } else if (i === 4) {
         location.href = "/info.html"
+      } else if (i === 3) {
+        location.href = "/order.html"
       } else if (i === 1){
         location.href = "/"
       }
