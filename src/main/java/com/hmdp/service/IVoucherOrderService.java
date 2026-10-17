@@ -1,10 +1,22 @@
 package com.hmdp.service;
 
-import com.hmdp.dto.Result;
-import com.hmdp.entity.VoucherOrder;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.hmdp.dto.LoginFormDTO;
+import com.hmdp.dto.Result;
+import com.hmdp.entity.User;
 
-public interface IVoucherOrderService extends IService<VoucherOrder> {
+import javax.servlet.http.HttpSession;
 
-    Result seckillVoucher(Long voucherId);
+public interface IUserService extends IService<User> {
+
+    Result sendCode(String phone, HttpSession session);
+
+    Result login(LoginFormDTO loginForm, HttpSession session);
+
+    Result logout(String token);
+
+    Result sign();
+
+    Result signCount();
+
 }

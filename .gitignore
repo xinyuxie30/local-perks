@@ -46,3 +46,6 @@ nginx-1.18.0/logs/
 nginx-1.18.0/temp/
 *.log
 publish-prep/
+
+# WorkBuddy assistant workspace (session logs, memory, tmp)
+.workbuddy/

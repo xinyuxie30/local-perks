@@ -22,6 +22,20 @@ spring:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: local-perks-producer
+seckill:
+  # A：入口执行 Lua 预扣库存并通过事务消息投递下单；B：入口只排队，库存由消费者认领
+  mode: ${SECKILL_MODE:A}
+trade:
+  # RocketMQ 4.x 只有 18 个固定延迟级别：1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
+  # 默认 16 表示 30 分钟；本地演示改成 3（10 秒）方便观察关单
+  close-delay-level: ${TRADE_CLOSE_DELAY_LEVEL:16}
+  # 与上面延迟级别对应的业务口径，供对账补关单使用
+  close-delay-minutes: ${TRADE_CLOSE_DELAY_MINUTES:30}
+  reconcile-cron: ${TRADE_RECONCILE_CRON:0 2/5 * * * ?}
 logging:
   level:
     com.hmdp: debug
