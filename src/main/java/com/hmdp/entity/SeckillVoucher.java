@@ -33,6 +33,11 @@ public class SeckillVoucher implements Serializable {
     private Integer stock;
 
     /**
+     * 总库存，对账基准
+     */
+    private Integer totalStock;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;
