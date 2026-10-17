@@ -1125,10 +1125,20 @@
     }
     document.getElementById('memForm').style.display = '';
     banner.innerHTML = '';
-    fetch('/cs-api/memory?user_id=' + encodeURIComponent(uid))
-      .then(function (r) { return r.json(); })
+    fetch('/cs-api/memory?user_id=' + encodeURIComponent(uid) + '&auth_token=' + encodeURIComponent(readToken() || ''))
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) { throw new Error('auth'); }
+        return r.json();
+      })
       .then(function (d) { renderMemories(d.items || []); })
-      .catch(function () { list.innerHTML = '<div class="empty-sm">加载失败，请稍后重试</div>'; });
+      .catch(function (e) {
+        if (e && e.message === 'auth') {
+          banner.innerHTML = '<div class="banner-sm">登录态已过期，请重新<a href="/login.html">登录</a>后再查看记忆。</div>';
+          list.innerHTML = '<div class="empty-sm">登录后可查看与新增记忆</div>';
+        } else {
+          list.innerHTML = '<div class="empty-sm">加载失败，请稍后重试</div>';
+        }
+      });
   }
 
   var TYPE_LABEL = { user: '用户偏好', feedback: '反馈习惯', project: '项目资料', reference: '参考资料' };
@@ -1164,8 +1174,9 @@
     fetch('/cs-api/memory', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: uid, title: title, content: content, type: type })
+      body: JSON.stringify({ user_id: uid, title: title, content: content, type: type, auth_token: readToken() || '' })
     }).then(function (r) {
+      if (r.status === 401 || r.status === 403) { throw new Error('auth'); }
       if (!r.ok) { throw new Error('HTTP ' + r.status); }
       return r.json();
     }).then(function (d) {
@@ -1174,16 +1185,22 @@
       setMemEditing(false);
       renderMemories(d.items || []);
       toast('已保存');
-    }).catch(function (e) { toast('保存失败：' + e.message); });
+    }).catch(function (e) {
+      toast(e && e.message === 'auth' ? '登录态已过期，请重新登录' : '保存失败：' + e.message);
+    });
   }
 
   function deleteMemory(file) {
     var uid = memUser();
     if (!uid || !file) { return; }
-    fetch('/cs-api/memory?user_id=' + encodeURIComponent(uid) + '&file=' + encodeURIComponent(file), { method: 'DELETE' })
-      .then(function (r) { return r.json(); })
+    fetch('/cs-api/memory?user_id=' + encodeURIComponent(uid) + '&file=' + encodeURIComponent(file)
+        + '&auth_token=' + encodeURIComponent(readToken() || ''), { method: 'DELETE' })
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) { throw new Error('auth'); }
+        return r.json();
+      })
       .then(function (d) { renderMemories(d.items || []); toast(d.deleted ? '已删除' : '删除失败'); })
-      .catch(function () { toast('删除失败'); });
+      .catch(function (e) { toast(e && e.message === 'auth' ? '登录态已过期，请重新登录' : '删除失败'); });
   }
 
   document.getElementById('memSave').addEventListener('click', saveMemory);
