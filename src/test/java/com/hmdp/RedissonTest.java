@@ -6,12 +6,14 @@ import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 import javax.annotation.Resource;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @SpringBootTest
+@ActiveProfiles("test")
 class RedissonTest {
 
     @Resource

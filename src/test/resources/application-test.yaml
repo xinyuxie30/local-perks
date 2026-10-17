@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC&characterEncoding=utf8&allowPublicKeyRetrieval=true
+    username: ${DB_USER:root}
+    # 通过环境变量 DB_PASSWORD 注入，测试库与开发库共用
+    password: ${DB_PASSWORD:}
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:123456}
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: local-perks-test-producer
+seckill:
+  mode: A
+trade:
+  close-delay-level: 3
+  close-delay-minutes: 30
+  reconcile-batch-size: 50
+app:
+  admin:
+    user-ids: 1011
+  rate-limit:
+    enabled: true
+    fail-open: true
+logging:
+  level:
+    com.hmdp: info

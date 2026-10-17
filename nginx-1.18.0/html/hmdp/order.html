@@ -1,224 +1,500 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
-<title>智能客服 · 智惠生活通</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; }
-  body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; background: #f2f3f5; color: #333; }
-  #app { max-width: 720px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; background: #f2f3f5; }
-  .cs-header { padding: 14px 18px; background: #fff; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 5; }
-  .cs-logo { width: 34px; height: 34px; border-radius: 50%; background: #ff6633; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex: 0 0 34px; }
-  .cs-title { font-size: 16px; font-weight: 600; }
-  .cs-sub { font-size: 12px; color: #999; margin-top: 2px; }
-  .cs-status { margin-left: auto; font-size: 12px; color: #52c41a; display: flex; align-items: center; gap: 5px; }
-  .cs-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #52c41a; display: inline-block; }
-  .cs-list { flex: 1; overflow-y: auto; padding: 16px 14px 8px; }
-  .cs-row { display: flex; margin-bottom: 14px; align-items: flex-start; gap: 8px; }
-  .cs-row.user { flex-direction: row-reverse; }
-  .cs-avatar { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 34px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
-  .cs-avatar.bot { background: #fff2ec; color: #ff6633; border: 1px solid #ffd9c9; }
-  .cs-avatar.user { background: #e6f1fb; color: #378add; border: 1px solid #c5e0f7; }
-  .cs-bubble { max-width: 76%; padding: 10px 13px; border-radius: 12px; font-size: 14px; line-height: 1.65; word-break: break-word; }
-  .cs-bubble.bot { background: #fff; border: 1px solid #eee; border-top-left-radius: 4px; }
-  .cs-bubble.user { background: #ff6633; color: #fff; border-top-right-radius: 4px; }
-  .cs-meta { font-size: 11px; color: #bbb; margin-top: 5px; }
-  .cs-typing { display: inline-flex; gap: 4px; padding: 4px 0; }
-  .cs-typing i { width: 6px; height: 6px; border-radius: 50%; background: #ff6633; opacity: .35; animation: blink 1.2s infinite; }
-  .cs-typing i:nth-child(2) { animation-delay: .2s; }
-  .cs-typing i:nth-child(3) { animation-delay: .4s; }
-  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
-  .cs-suggest { display: flex; gap: 8px; padding: 0 14px 10px; flex-wrap: wrap; }
-  .cs-chip { font-size: 12px; color: #ff6633; background: #fff2ec; border: 1px solid #ffd9c9; padding: 6px 12px; border-radius: 16px; cursor: pointer; }
-  .cs-chip:hover { background: #ffe7db; }
-  .cs-inputbar { padding: 10px 14px 14px; background: #fff; border-top: 1px solid #eee; display: flex; gap: 10px; }
-  .cs-input { flex: 1; border: 1px solid #e5e5e5; border-radius: 10px; padding: 10px 12px; font-size: 14px; resize: none; height: 44px; outline: none; font-family: inherit; }
-  .cs-input:focus { border-color: #ff6633; }
-  .cs-send { width: 84px; border: none; border-radius: 10px; background: #ff6633; color: #fff; font-size: 15px; cursor: pointer; }
-  .cs-send:disabled { background: #ffc2a8; cursor: not-allowed; }
-  .cs-welcome { text-align: center; color: #999; font-size: 12px; padding: 8px 0 14px; }
-  .cs-approve { margin-top: 8px; display: flex; gap: 8px; }
-  .cs-approve button { padding: 6px 18px; border-radius: 16px; border: 1px solid #ffd9c9; font-size: 13px; cursor: pointer; }
-  .cs-approve-yes { background: #ff6633; color: #fff; border-color: #ff6633 !important; }
-  .cs-approve-no { background: #fff; color: #666; }
-</style>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+  <title>我的订单</title>
+  <link rel="stylesheet" href="./css/element.css">
+  <link href="./css/main.css" rel="stylesheet">
+  <link href="./css/info.css" rel="stylesheet">
+
+  <style type="text/css">
+    .order-tabs {
+      display: flex;
+      height: 40px;
+      line-height: 40px;
+      background: #fff;
+      border-bottom: 1px solid #f1f1f1;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .order-tab {
+      flex: 0 0 auto;
+      padding: 0 12px;
+      font-size: 13px;
+      color: #82848a;
+    }
+
+    .order-tab.active {
+      color: #ff6633;
+      font-weight: bold;
+      border-bottom: 2px solid #ff6633;
+    }
+
+    /* 原实现用 calc(100% - 128px) 硬编码高度，出现提示条或多一条 tab 时列表会被底部导航盖住；
+       改成纵向 flex，由列表自己滚动，底部留出导航高度 */
+    #app {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header, .order-tabs, .pending-bar {
+      flex: 0 0 auto;
+    }
+
+    .order-list {
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 10px 10px 88px 10px;
+      overflow-y: auto;
+      height: auto;
+    }
+
+    .order-card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    }
+
+    .order-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: #82848a;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed #f1f1f1;
+    }
+
+    .order-card-head .order-status {
+      font-weight: bold;
+    }
+
+    .status-1 {
+      color: #ff6633;
+    }
+
+    .status-2, .status-5 {
+      color: #409eff;
+    }
+
+    .status-3 {
+      color: #67c23a;
+    }
+
+    .status-4, .status-6 {
+      color: #909399;
+    }
+
+    .order-card-body {
+      padding: 8px 0;
+    }
+
+    .order-title {
+      font-size: 15px;
+      font-weight: bold;
+      color: #333;
+    }
+
+    .order-subtitle {
+      font-size: 12px;
+      color: #82848a;
+      margin-top: 4px;
+    }
+
+    .order-price {
+      font-size: 18px;
+      color: #ff6633;
+      font-weight: bold;
+      margin-top: 6px;
+    }
+
+    .order-actual {
+      font-size: 12px;
+      color: #82848a;
+      font-weight: normal;
+      margin-left: 8px;
+    }
+
+    .order-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #b0b3b8;
+      padding-top: 6px;
+      border-top: 1px dashed #f1f1f1;
+    }
+
+    .order-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    .order-actions .btn {
+      padding: 4px 14px;
+      border-radius: 14px;
+      font-size: 13px;
+      margin-left: 8px;
+    }
+
+    .order-actions .btn.primary {
+      background: #ff6633;
+      color: #fff;
+    }
+
+    .order-actions .btn.ghost {
+      border: 1px solid #dcdfe6;
+      color: #606266;
+    }
+
+    .order-empty {
+      text-align: center;
+      color: #82848a;
+      font-size: 13px;
+      padding: 60px 20px;
+    }
+
+    .load-more {
+      text-align: center;
+      font-size: 13px;
+      color: #409eff;
+      padding: 10px 0 20px 0;
+    }
+
+    .header-refresh {
+      font-size: 18px;
+      color: #606266;
+      padding: 0 12px;
+    }
+
+    .header-refresh.spinning {
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .order-countdown {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #ff6633;
+      background: #fff5f0;
+      border-radius: 4px;
+      padding: 4px 8px;
+    }
+
+    .order-countdown.expired {
+      color: #909399;
+      background: #f5f5f5;
+    }
+
+    .empty-action {
+      margin-top: 18px;
+      display: inline-block;
+      padding: 8px 22px;
+      border-radius: 18px;
+      background: #ff6633;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    .pending-bar {
+      margin: 10px 10px 0 10px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: #fff8e6;
+      color: #b88230;
+      font-size: 12px;
+    }
+  </style>
 </head>
+
 <body>
 <div id="app">
-  <div class="cs-header">
-    <div class="cs-logo">客服</div>
-    <div>
-      <div class="cs-title">智惠生活通 · 智能客服</div>
-      <div class="cs-sub">Agent 工具调用 · 由 EchoMind 驱动</div>
+  <div class="header">
+    <div class="header-back-btn" @click="goBack"><i class="el-icon-arrow-left"></i></div>
+    <div class="header-title">我的订单&nbsp;&nbsp;&nbsp;</div>
+    <div class="header-refresh" :class="{spinning: loading}" @click="refresh"><i class="el-icon-refresh"></i></div>
+  </div>
+  <div class="pending-bar" v-if="pendingTip">{{pendingTip}}</div>
+  <div class="order-tabs">
+    <div class="order-tab" v-for="t in tabs" :key="t.label"
+         :class="{active: status === t.value}" @click="switchStatus(t.value)">{{t.label}}
     </div>
-    <div class="cs-status">在线</div>
   </div>
-  <div class="cs-list" id="csList">
-    <div class="cs-welcome">你好，我是智惠生活通智能客服，可以帮你查店铺、查优惠券、查订单、抢秒杀券，也能解答登录、签到、退款等问题～</div>
+  <div class="order-list">
+    <div class="order-card" v-for="o in orders" :key="o.id">
+      <div class="order-card-head">
+        <div>{{o.shopName || '店铺'}}</div>
+        <div class="order-status" :class="'status-' + o.status">{{statusText(o.status)}}</div>
+      </div>
+      <div class="order-card-body">
+        <div class="order-title">{{o.title}}</div>
+        <div class="order-subtitle">{{o.subTitle}}</div>
+        <div class="order-price">￥{{util.formatPrice(o.payValue)}}
+          <span class="order-actual">可抵扣 ￥{{util.formatPrice(o.actualValue)}}</span>
+        </div>
+      </div>
+      <div class="order-meta">
+        <span>订单号 {{o.id}}</span>
+        <span>{{formatTime(o.createTime)}}</span>
+      </div>
+      <div class="order-countdown" :class="{expired: remainMs(o) <= 0}" v-if="o.status === 1">
+        <template v-if="remainMs(o) > 0">请在 {{util.formatCountdown(remainMs(o))}} 内完成支付，超时自动关闭</template>
+        <template v-else>支付已超时，订单正在关闭…</template>
+      </div>
+      <div class="order-actions" v-if="o.status === 1">
+        <div class="btn ghost" @click="cancelOrder(o)">取消订单</div>
+        <div class="btn primary" @click="payOrder(o)">立即支付</div>
+      </div>
+      <div class="order-actions" v-else-if="o.status === 2">
+        <div class="btn ghost" @click="refundOrder(o)">申请退款</div>
+        <div class="btn primary" @click="useOrder(o)">去使用</div>
+      </div>
+    </div>
+    <div class="order-empty" v-if="!orders.length && !loading">
+      {{emptyTip}}
+      <div><a class="empty-action" href="/index.html">去逛逛</a></div>
+    </div>
+    <div class="load-more" v-if="orders.length && orders.length < total" @click="loadMore">加载更多</div>
   </div>
-  <div class="cs-suggest" id="csSuggest">
-    <div class="cs-chip">秒杀券怎么抢？</div>
-    <div class="cs-chip">附近有什么好店？</div>
-    <div class="cs-chip">我的订单怎么查？</div>
-    <div class="cs-chip">签到有什么用？</div>
-  </div>
-  <div class="cs-inputbar">
-    <textarea id="csInput" class="cs-input" placeholder="输入你的问题，回车发送（Shift+回车换行）"></textarea>
-    <button id="csSend" class="cs-send">发送</button>
-  </div>
+  <foot-bar :active-btn="3"></foot-bar>
 </div>
+<script src="./js/vue.js"></script>
+<script src="./js/axios.min.js"></script>
+<script src="./js/element.js"></script>
+<script src="./js/common.js"></script>
+<script src="./js/footer.js"></script>
 <script>
-(function () {
-  var listEl = document.getElementById('csList');
-  var inputEl = document.getElementById('csInput');
-  var sendEl = document.getElementById('csSend');
-  var state = {
-    conversationId: 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-    userId: 'guest',
-    authToken: null,
-    busy: false
-  };
-
-  function esc(text) {
-    return String(text == null ? '' : text)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
-  function fmt(text) {
-    return esc(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
-  }
-  function scrollBottom() { listEl.scrollTop = listEl.scrollHeight; }
-
-  function addMsg(role, text, meta) {
-    var row = document.createElement('div');
-    row.className = 'cs-row ' + role;
-    var avatar = '<div class="cs-avatar ' + role + '">' + (role === 'user' ? '我' : 'AI') + '</div>';
-    var metaHtml = meta ? '<div class="cs-meta">' + esc(meta) + '</div>' : '';
-    row.innerHTML = avatar + '<div><div class="cs-bubble ' + role + '">' + fmt(text) + '</div>' + metaHtml + '</div>';
-    listEl.appendChild(row);
-    scrollBottom();
-    return row;
-  }
-  function addTyping() {
-    var row = document.createElement('div');
-    row.className = 'cs-row bot';
-    row.innerHTML = '<div class="cs-avatar bot">AI</div><div class="cs-bubble bot"><span class="cs-typing"><i></i><i></i><i></i></span></div>';
-    listEl.appendChild(row);
-    scrollBottom();
-    return row;
-  }
-  function setBusy(busy) {
-    state.busy = busy;
-    sendEl.disabled = busy;
-    sendEl.textContent = busy ? '回复中' : '发送';
-  }
-  function metaOf(data) {
-    var parts = [];
-    if (data.tools_used && data.tools_used.length) { parts.push('工具: ' + data.tools_used.join(', ')); }
-    if (data.latency_ms != null) { parts.push(data.latency_ms + ' ms'); }
-    return parts.length ? 'AI 客服 · ' + parts.join(' · ') : 'AI 客服';
-  }
-
-  async function send(text) {
-    text = (text || '').trim();
-    if (!text || state.busy) { return; }
-    setBusy(true);
-    addMsg('user', text);
-    inputEl.value = '';
-    var typingRow = addTyping();
-    try {
-      var resp = await fetch('/cs-api/chat/agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          user_id: state.userId,
-          conversation_id: state.conversationId,
-          auth_token: state.authToken
-        })
-      });
-      if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
-      var data = await resp.json();
-      typingRow.remove();
-      if (data.requires_approval) {
-        showApproval(data);
-      } else {
-        addMsg('bot', data.response || '（暂时没有回复内容）', metaOf(data));
+  const app = new Vue({
+    el: "#app",
+    data: {
+      util,
+      tabs: [
+        {label: "全部", value: null},
+        {label: "未支付", value: 1},
+        {label: "已支付", value: 2},
+        {label: "已核销", value: 3},
+        {label: "已取消", value: 4},
+        {label: "已退款", value: 6}
+      ],
+      status: null,
+      orders: [],
+      current: 1,
+      total: 0,
+      loading: false,
+      pendingTip: "",
+      emptyTip: "还没有订单，去挑一张优惠券吧",
+      // 未支付订单持有时间（分钟），由后端 /config/public 下发，避免前后端写死的口径不一致
+      holdMinutes: 30,
+      nowTs: Date.now(),
+      tickTimer: null,
+      autoTimer: null,
+      closingExpired: false
+    },
+    created() {
+      // 从商铺页抢购成功后跳过来时带着订单号，先轮询结果
+      let orderId = util.getUrlParam("orderId");
+      if (orderId) {
+        this.pendingTip = "抢购成功，正在排队生成订单…";
+        this.pollResult(orderId, 0);
       }
-    } catch (err) {
-      typingRow.remove();
-      addMsg('bot', '抱歉，智能客服暂时不可用（' + err.message + '）。请确认服务已启动后重试。');
-    } finally {
-      setBusy(false);
-      inputEl.focus();
+      this.loadConfig();
+      this.queryOrders(true);
+    },
+    mounted() {
+      // 倒计时每秒刷新
+      this.tickTimer = setInterval(this.tick, 1000);
+      // 有未支付订单时每 20 秒静默刷新一次，避免用户干等
+      this.autoTimer = setInterval(() => {
+        if (!document.hidden && this.hasUnpaid()) {
+          this.queryOrders(true, true);
+        }
+      }, 20000);
+    },
+    beforeDestroy() {
+      clearInterval(this.tickTimer);
+      clearInterval(this.autoTimer);
+    },
+    methods: {
+      goBack() {
+        history.back();
+      },
+      loadConfig() {
+        axios.get("/config/public")
+          .then(({data}) => {
+            if (data && data.orderHoldMinutes) {
+              this.holdMinutes = data.orderHoldMinutes;
+            }
+          })
+          .catch(() => {
+            // 配置拿不到就用默认 30 分钟，不影响主流程
+          })
+      },
+      hasUnpaid() {
+        return this.orders.some(o => o.status === 1);
+      },
+      /** 未支付订单剩余毫秒数 */
+      remainMs(order) {
+        if (order.status !== 1 || !order.createTime) {
+          return 0;
+        }
+        // 后端返回 ISO 格式（2026-10-18T01:18:20），直接 new Date 在 Safari 上会得到 Invalid Date
+        const created = util.toDate(order.createTime);
+        if (!created) {
+          return 0;
+        }
+        return created.getTime() + this.holdMinutes * 60 * 1000 - this.nowTs;
+      },
+      tick() {
+        if (document.hidden) {
+          return;
+        }
+        this.nowTs = Date.now();
+        if (!this.closingExpired && this.orders.some(o => o.status === 1 && this.remainMs(o) <= 0)) {
+          // 本地倒计时到点，等后端延迟消息关单后再拉一次
+          this.closingExpired = true;
+          setTimeout(() => {
+            this.queryOrders(true, true);
+            this.closingExpired = false;
+          }, 3000);
+        }
+      },
+      refresh() {
+        this.queryOrders(true);
+      },
+      switchStatus(value) {
+        if (this.status === value) {
+          return;
+        }
+        this.status = value;
+        this.queryOrders(true);
+      },
+      queryOrders(reset, silent) {
+        if (reset) {
+          this.current = 1;
+        }
+        if (!silent) {
+          this.loading = true;
+        }
+        let params = {current: this.current};
+        if (this.status !== null) {
+          params.status = this.status;
+        }
+        // 轮询场景下 2 秒超时偏紧，这里放宽到 5 秒
+        axios.get("/voucher-order/list", {params, timeout: 5000})
+          .then(({data, total}) => {
+            this.total = total || 0;
+            const rows = data || [];
+            this.orders = reset ? rows : this.orders.concat(rows);
+            if (rows.length) {
+              this.pendingTip = "";
+            }
+          })
+          .catch(err => {
+            if (silent) {
+              console.warn("静默刷新订单失败：", err);
+            } else {
+              this.$message.error(err);
+            }
+          })
+          .finally(() => {
+            if (!silent) {
+              this.loading = false;
+            }
+          })
+      },
+      loadMore() {
+        this.current++;
+        this.queryOrders(false);
+      },
+      pollResult(orderId, times) {
+        if (times > 15) {
+          this.pendingTip = "订单仍在处理中，请稍后重新进入本页查看";
+          return;
+        }
+        axios.get("/voucher-order/status/" + orderId, {timeout: 5000})
+          .then(({data}) => {
+            if (data.state === "PENDING") {
+              setTimeout(() => this.pollResult(orderId, times + 1), 1000);
+            } else if (data.state === "CREATED") {
+              this.pendingTip = "";
+              this.$message.success("下单成功，请在有效期内完成支付");
+              this.queryOrders(true);
+            } else if (data.state === "FAILED") {
+              this.pendingTip = "本次抢购未成功，库存或资格不满足";
+              this.$message.error(this.pendingTip);
+            } else {
+              this.pendingTip = "未找到该订单";
+            }
+          })
+          .catch(err => {
+            this.pendingTip = "";
+            this.$message.error(err);
+          })
+      },
+      payOrder(o) {
+        this.$confirm("确认支付这张优惠券吗？", "支付确认", {type: "warning"})
+          .then(() => axios.post("/voucher-order/" + o.id + "/pay?payType=1"))
+          .then(() => {
+            this.$message.success("支付成功");
+            this.queryOrders(true);
+          })
+          .catch(err => this.handleActionError(err));
+      },
+      cancelOrder(o) {
+        this.$confirm("取消后该券不可再次购买，确认取消吗？", "取消订单", {type: "warning"})
+          .then(() => axios.post("/voucher-order/" + o.id + "/cancel"))
+          .then(() => {
+            this.$message.success("订单已取消，库存已归还");
+            this.queryOrders(true);
+          })
+          .catch(err => this.handleActionError(err));
+      },
+      useOrder(o) {
+        this.$confirm("确认到店核销该优惠券吗？", "核销确认", {type: "warning"})
+          .then(() => axios.post("/voucher-order/" + o.id + "/use"))
+          .then(() => {
+            this.$message.success("核销成功");
+            this.queryOrders(true);
+          })
+          .catch(err => this.handleActionError(err));
+      },
+      refundOrder(o) {
+        this.$confirm("确认申请退款吗？", "退款确认", {type: "warning"})
+          .then(() => axios.post("/voucher-order/" + o.id + "/refund"))
+          .then(() => {
+            this.$message.success("已退款");
+            this.queryOrders(true);
+          })
+          .catch(err => this.handleActionError(err));
+      },
+      handleActionError(err) {
+        // 取消对话框时 element-ui 抛出的是 cancel / close
+        if (err === "cancel" || err === "close") {
+          return;
+        }
+        this.$message.error(err);
+        this.queryOrders(true);
+      },
+      statusText(status) {
+        const map = {1: "未支付", 2: "已支付", 3: "已核销", 4: "已取消", 5: "退款中", 6: "已退款"};
+        return map[status] || "未知";
+      },
+      formatTime(time) {
+        return util.formatTime(time);
+      }
     }
-  }
-
-  function showApproval(data) {
-    var row = document.createElement('div');
-    row.className = 'cs-row bot';
-    var html = '<div class="cs-avatar bot">AI</div><div>';
-    html += '<div class="cs-bubble bot">' + fmt(data.response) + '</div>';
-    html += '<div class="cs-approve">';
-    html += '<button class="cs-approve-yes">确认</button>';
-    html += '<button class="cs-approve-no">取消</button>';
-    html += '</div></div>';
-    row.innerHTML = html;
-    listEl.appendChild(row);
-    scrollBottom();
-    var yes = row.querySelector('.cs-approve-yes');
-    var no = row.querySelector('.cs-approve-no');
-    yes.addEventListener('click', function () { approve(data.pending_token, true, row); });
-    no.addEventListener('click', function () { approve(data.pending_token, false, row); });
-  }
-
-  async function approve(token, approved, row) {
-    var btnBox = row.querySelector('.cs-approve');
-    if (btnBox) { btnBox.remove(); }
-    var typing = addTyping();
-    try {
-      var resp = await fetch('/cs-api/chat/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversation_id: state.conversationId, pending_token: token, approved: approved, auth_token: state.authToken })
-      });
-      if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
-      var data = await resp.json();
-      typing.remove();
-      addMsg('bot', data.response || '（已处理）', metaOf(data));
-    } catch (err) {
-      typing.remove();
-      addMsg('bot', '操作处理失败（' + err.message + '）。');
-    }
-  }
-
-  sendEl.addEventListener('click', function () { send(inputEl.value); });
-  inputEl.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(inputEl.value); }
-  });
-  document.getElementById('csSuggest').addEventListener('click', function (e) {
-    if (e.target && e.target.classList.contains('cs-chip')) { send(e.target.textContent); }
-  });
-
-  // 用本地登录态作为客服侧身份：token 透传给业务工具，userId 用于记忆隔离
-  (function resolveUser() {
-    try {
-      var token = localStorage.getItem('token');
-      if (!token) { return; }
-      state.authToken = token;
-      fetch('/api/user/me', { headers: { authorization: token } })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (j && j.data && j.data.id != null) { state.userId = 'u' + j.data.id; }
-        })
-        .catch(function () {});
-    } catch (e) {}
-  })();
-
-  inputEl.focus();
-})();
+  })
 </script>
+<script src="/js/assistant-entry.js"></script>
 </body>
+
 </html>

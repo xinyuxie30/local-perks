@@ -3,6 +3,11 @@ server:
 spring:
   application:
     name: local-perks
+  servlet:
+    multipart:
+      # 图片上传大小上限，防止大文件打爆堆内存
+      max-file-size: 5MB
+      max-request-size: 10MB
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
     url: "${DB_URL:jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC}"
@@ -36,6 +41,20 @@ trade:
   # 与上面延迟级别对应的业务口径，供对账补关单使用
   close-delay-minutes: ${TRADE_CLOSE_DELAY_MINUTES:30}
   reconcile-cron: ${TRADE_RECONCILE_CRON:0 2/5 * * * ?}
+  # 单次对账最多捞取的超时订单数，避免一次扫太多把内存和 DB 打满
+  reconcile-batch-size: ${TRADE_RECONCILE_BATCH:100}
+app:
+  admin:
+    # 管理端接口白名单，逗号分隔的用户id；默认测试账号 1011
+    user-ids: ${ADMIN_USER_IDS:1011}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    # Redis 故障时是否放行：业务接口优先可用性
+    fail-open: ${RATE_LIMIT_FAIL_OPEN:true}
+  cache:
+    # 本地缓存条目上限与过期时间，防止堆内存无界增长
+    shop-max-size: ${SHOP_LOCAL_CACHE_MAX:10000}
+    shop-ttl-seconds: ${SHOP_LOCAL_CACHE_TTL:300}
 logging:
   level:
     com.hmdp: debug

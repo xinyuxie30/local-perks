@@ -1,111 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.3.12.RELEASE</version>
-        <relativePath/> <!-- lookup parent from repository -->
-    </parent>
-    <groupId>com.hmdp</groupId>
-    <artifactId>local-perks</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <name>LocalPerks</name>
-    <description>LocalPerks - local discovery, community and voucher services</description>
-    <properties>
-        <java.version>1.8</java.version>
-    </properties>
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-            <exclusions>
-                <exclusion>
-                    <artifactId>spring-data-redis</artifactId>
-                    <groupId>org.springframework.data</groupId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>lettuce-core</artifactId>
-                    <groupId>io.lettuce</groupId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.data</groupId>
-            <artifactId>spring-data-redis</artifactId>
-            <version>2.6.2</version>
-        </dependency>
-        <dependency>
-            <groupId>io.lettuce</groupId>
-            <artifactId>lettuce-core</artifactId>
-            <version>6.1.6.RELEASE</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-pool2</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hmdp.mapper.VoucherOrderMapper">
 
-        <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <scope>runtime</scope>
-            <version>5.1.47</version>
-        </dependency>
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-boot-starter</artifactId>
-            <version>3.4.3</version>
-        </dependency>
-        <!--hutool-->
-        <dependency>
-            <groupId>cn.hutool</groupId>
-            <artifactId>hutool-all</artifactId>
-            <version>5.7.17</version>
-        </dependency>
-        <!--redisson-->
-        <dependency>
-            <groupId>org.redisson</groupId>
-            <artifactId>redisson</artifactId>
-            <version>3.13.6</version>
-        </dependency>
-        <!--rocketmq，2.2.x 兼容 Spring Boot 2.x / Java 8，2.3.x 起要求 Spring Boot 3-->
-        <dependency>
-            <groupId>org.apache.rocketmq</groupId>
-            <artifactId>rocketmq-spring-boot-starter</artifactId>
-            <version>2.2.3</version>
-        </dependency>
-    </dependencies>
+    <sql id="orderColumns">
+        o.`id`            AS id,
+        o.`user_id`       AS userId,
+        o.`voucher_id`    AS voucherId,
+        o.`status`        AS status,
+        o.`pay_type`      AS payType,
+        o.`create_time`   AS createTime,
+        o.`pay_time`      AS payTime,
+        o.`use_time`      AS useTime,
+        o.`refund_time`   AS refundTime,
+        v.`title`         AS title,
+        v.`sub_title`     AS subTitle,
+        v.`rules`         AS rules,
+        v.`pay_value`     AS payValue,
+        v.`actual_value`  AS actualValue,
+        v.`shop_id`       AS shopId,
+        s.`name`          AS shopName
+    </sql>
 
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
+    <select id="queryMyOrders" resultType="com.hmdp.vo.OrderVO">
+        SELECT
+        <include refid="orderColumns"/>
+        FROM tb_voucher_order o
+        LEFT JOIN tb_voucher v ON o.voucher_id = v.id
+        LEFT JOIN tb_shop s ON v.shop_id = s.id
+        WHERE o.user_id = #{userId}
+        <if test="status != null">
+            AND o.status = #{status}
+        </if>
+        ORDER BY o.create_time DESC
+    </select>
 
-</project>
+    <select id="queryOrderDetail" resultType="com.hmdp.vo.OrderVO">
+        SELECT
+        <include refid="orderColumns"/>
+        FROM tb_voucher_order o
+        LEFT JOIN tb_voucher v ON o.voucher_id = v.id
+        LEFT JOIN tb_shop s ON v.shop_id = s.id
+        WHERE o.id = #{orderId} AND o.user_id = #{userId}
+    </select>
+
+    <select id="countDistinctUser" resultType="java.lang.Integer">
+        SELECT COUNT(DISTINCT user_id) FROM tb_voucher_order WHERE voucher_id = #{voucherId}
+    </select>
+</mapper>

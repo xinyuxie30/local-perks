@@ -1,6 +1,8 @@
 package com.hmdp.controller;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.hmdp.annotation.RateLimit;
+import com.hmdp.annotation.RateLimitDimension;
 import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
@@ -30,6 +32,8 @@ public class UserController {
      * 发送手机验证码
      */
     @PostMapping("code")
+    @RateLimit(prefix = "user:code", limit = 5, windowSeconds = 60,
+            dimension = RateLimitDimension.IP, message = "验证码请求过于频繁")
     public Result sendCode(@RequestParam("phone") String phone, HttpSession session) {
         // 发送短信验证码并保存验证码
         return userService.sendCode(phone, session);
@@ -40,6 +44,8 @@ public class UserController {
      * @param loginForm 登录参数，包含手机号、验证码；或者手机号、密码
      */
     @PostMapping("/login")
+    @RateLimit(prefix = "user:login", limit = 10, windowSeconds = 60,
+            dimension = RateLimitDimension.IP, message = "登录尝试过于频繁")
     public Result login(@RequestBody LoginFormDTO loginForm, HttpSession session){
         // 实现登录功能
         return userService.login(loginForm, session);

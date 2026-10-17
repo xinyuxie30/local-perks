@@ -1,31 +1,54 @@
 package com.hmdp.mq;
 
 import com.hmdp.dto.SeckillOrderMessage;
-import com.hmdp.service.IVoucherOrderService;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
-import org.apache.rocketmq.spring.core.RocketMQListener;
+import org.apache.rocketmq.client.producer.TransactionSendResult;
+import org.apache.rocketmq.spring.core.RocketMQTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
 
-/**
- * 延迟关单消费者：到期仍然未支付的订单改为已取消并回补库存。
- * 与支付并发时由条件更新决定胜负，重复投递也只是空跑一次
- */
 @Slf4j
 @Component
-@RocketMQMessageListener(topic = MqConstants.ORDER_CLOSE_TOPIC, consumerGroup = MqConstants.ORDER_CLOSE_GROUP)
-public class OrderCloseConsumer implements RocketMQListener<SeckillOrderMessage> {
+public class SeckillOrderProducer {
 
     @Resource
-    private IVoucherOrderService voucherOrderService;
+    private RocketMQTemplate rocketMQTemplate;
 
-    @Override
-    public void onMessage(SeckillOrderMessage message) {
-        boolean closed = voucherOrderService.closeOrderIfUnpaid(message.getOrderId());
-        if (!closed) {
-            log.info("订单无需关闭（已支付或已处理），orderId={}", message.getOrderId());
-        }
+    /**
+     * RocketMQ 4.x 只支持 18 个固定延迟级别：1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
+     * 默认 16 对应 30 分钟；演示时改成 3（10s）方便观察关单
+     */
+    @Value("${trade.close-delay-level:16}")
+    private int closeDelayLevel;
+
+    /**
+     * 模式 A：事务消息。半消息先落 Broker，本地事务成功才提交
+     */
+    public TransactionSendResult sendOrderMessageInTransaction(SeckillOrderMessage message) {
+        return rocketMQTemplate.sendMessageInTransaction(
+                MqConstants.SECKILL_ORDER_TOPIC,
+                MessageBuilder.withPayload(message).build(),
+                message);
+    }
+
+    /**
+     * 模式 B：入口只排队，用普通消息把创建订单的请求投递出去
+     */
+    public void sendOrderMessage(SeckillOrderMessage message) {
+        rocketMQTemplate.syncSend(MqConstants.SECKILL_ORDER_TOPIC, message);
+    }
+
+    /**
+     * 订单落库成功后投递延迟关单消息
+     */
+    public void sendCloseDelayMessage(SeckillOrderMessage message) {
+        rocketMQTemplate.syncSend(
+                MqConstants.ORDER_CLOSE_TOPIC,
+                MessageBuilder.withPayload(message).build(),
+                3000,
+                closeDelayLevel);
     }
 }

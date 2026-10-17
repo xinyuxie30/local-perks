@@ -16,6 +16,7 @@ import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.hmdp.utils.RedisConstants.SECKILL_ORDER_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_STOCK_KEY;
@@ -34,6 +35,17 @@ public class TradeReconcileTask {
     @Value("${trade.close-delay-minutes:30}")
     private int closeDelayMinutes;
 
+    /**
+     * 单次最多处理的超时订单数，避免一次扫全表把内存与数据库打满
+     */
+    @Value("${trade.reconcile-batch-size:100}")
+    private int batchSize;
+
+    /**
+     * 防止定时任务与手动触发重叠执行，两个实例同时改库存会互相覆盖
+     */
+    private final AtomicBoolean running = new AtomicBoolean(false);
+
     @Resource
     private IVoucherOrderService voucherOrderService;
 
@@ -48,8 +60,20 @@ public class TradeReconcileTask {
 
     @Scheduled(cron = "${trade.reconcile-cron:0 2/5 * * * ?}")
     public void reconcile() {
-        closeExpiredOrders();
-        checkStock();
+        if (!running.compareAndSet(false, true)) {
+            log.info("上一轮对账尚未结束，本次跳过");
+            return;
+        }
+        long begin = System.currentTimeMillis();
+        try {
+            closeExpiredOrders();
+            checkStock();
+            log.debug("对账完成，耗时 {}ms", System.currentTimeMillis() - begin);
+        } catch (Exception e) {
+            log.error("对账任务执行失败", e);
+        } finally {
+            running.set(false);
+        }
     }
 
     /**
@@ -60,6 +84,8 @@ public class TradeReconcileTask {
         List<VoucherOrder> expired = voucherOrderService.query()
                 .eq("status", OrderStatus.UNPAID)
                 .lt("create_time", deadline)
+                .orderByAsc("id")
+                .last("LIMIT " + Math.max(batchSize, 1))
                 .list();
         if (expired.isEmpty()) {
             return;
@@ -84,21 +110,19 @@ public class TradeReconcileTask {
                 continue;
             }
             String redisStock = stringRedisTemplate.opsForValue().get(SECKILL_STOCK_KEY + voucherId);
-            if (redisStock == null) {
-                // 券没有预热到 Redis，入口 Lua 会直接拒绝，不存在占用
-                continue;
-            }
-            long occupied = sizeOf(SECKILL_ORDER_KEY + voucherId);
-            long canceled = voucherOrderService.query()
-                    .eq("voucher_id", voucherId)
-                    .eq("status", OrderStatus.CANCELED)
-                    .count();
-            long expectedRedisStock = voucher.getTotalStock() - occupied + canceled;
-            if (Long.parseLong(redisStock) != expectedRedisStock) {
-                log.warn("Redis 库存漂移，voucherId={}，实际={}，按订单表重算应为={}",
-                        voucherId, redisStock, expectedRedisStock);
-                stringRedisTemplate.opsForValue()
-                        .set(SECKILL_STOCK_KEY + voucherId, String.valueOf(expectedRedisStock));
+            if (redisStock != null) {
+                long occupied = sizeOf(SECKILL_ORDER_KEY + voucherId);
+                long canceled = voucherOrderService.query()
+                        .eq("voucher_id", voucherId)
+                        .eq("status", OrderStatus.CANCELED)
+                        .count();
+                long expectedRedisStock = voucher.getTotalStock() - occupied + canceled;
+                if (Long.parseLong(redisStock) != expectedRedisStock) {
+                    log.warn("Redis 库存漂移，voucherId={}，实际={}，按订单表重算应为={}",
+                            voucherId, redisStock, expectedRedisStock);
+                    stringRedisTemplate.opsForValue()
+                            .set(SECKILL_STOCK_KEY + voucherId, String.valueOf(expectedRedisStock));
+                }
             }
 
             long consuming = voucherOrderService.query()
@@ -118,12 +142,16 @@ public class TradeReconcileTask {
 
             Integer distinctUsers = voucherOrderMapper.countDistinctUser(voucherId);
             long distinct = distinctUsers == null ? 0L : distinctUsers;
-            if (occupied > distinct) {
+            if (sizeOf(SECKILL_ORDER_KEY + voucherId) > distinct) {
                 // 无法区分「消息还在途中」和「消息真的丢了」，因此只告警不自动补单
                 log.warn("存在占用标记但没有对应订单，voucherId={}，占用={}，有订单的用户={}",
-                        voucherId, occupied, distinct);
+                        voucherId, occupiedOf(voucherId), distinct);
             }
         }
+    }
+
+    private long occupiedOf(Long voucherId) {
+        return sizeOf(SECKILL_ORDER_KEY + voucherId);
     }
 
     private long sizeOf(String key) {

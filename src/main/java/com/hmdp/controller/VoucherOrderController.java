@@ -1,100 +1,71 @@
 package com.hmdp.controller;
 
-import cn.hutool.core.bean.BeanUtil;
-import com.hmdp.dto.LoginFormDTO;
+import com.hmdp.annotation.RateLimit;
+import com.hmdp.annotation.RateLimitDimension;
 import com.hmdp.dto.Result;
-import com.hmdp.dto.UserDTO;
-import com.hmdp.entity.User;
-import com.hmdp.entity.UserInfo;
-import com.hmdp.service.IUserInfoService;
-import com.hmdp.service.IUserService;
-import com.hmdp.utils.UserHolder;
-import lombok.extern.slf4j.Slf4j;
+import com.hmdp.service.IVoucherOrderService;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
-import javax.servlet.http.HttpSession;
 
-@Slf4j
 @RestController
-@RequestMapping("/user")
-public class UserController {
+@RequestMapping("/voucher-order")
+public class VoucherOrderController {
 
     @Resource
-    private IUserService userService;
-
-    @Resource
-    private IUserInfoService userInfoService;
+    private IVoucherOrderService voucherOrderService;
 
     /**
-     * 发送手机验证码
+     * 抢购秒杀券，成功返回订单id（模式 B 下订单可能仍在排队，需轮询状态）
      */
-    @PostMapping("code")
-    public Result sendCode(@RequestParam("phone") String phone, HttpSession session) {
-        // 发送短信验证码并保存验证码
-        return userService.sendCode(phone, session);
+    @PostMapping("seckill/{id}")
+    @RateLimit(prefix = "seckill", limit = 5, windowSeconds = 1,
+            dimension = RateLimitDimension.USER, message = "手速太快了，缓一缓再试")
+    public Result seckillVoucher(@PathVariable("id") Long voucherId) {
+        return voucherOrderService.seckillVoucher(voucherId);
     }
 
     /**
-     * 登录功能
-     * @param loginForm 登录参数，包含手机号、验证码；或者手机号、密码
+     * 我的订单分页，status 为空表示全部
      */
-    @PostMapping("/login")
-    public Result login(@RequestBody LoginFormDTO loginForm, HttpSession session){
-        // 实现登录功能
-        return userService.login(loginForm, session);
+    @GetMapping("/list")
+    public Result queryMyOrders(
+            @RequestParam(value = "current", defaultValue = "1") Integer current,
+            @RequestParam(value = "status", required = false) Integer status) {
+        return voucherOrderService.queryMyOrders(current, status);
     }
 
     /**
-     * 登出功能
-     * @return 无
+     * 轮询抢购结果，订单落库前返回排队中
      */
-    @PostMapping("/logout")
-    public Result logout(@RequestHeader(value = "authorization", required = false) String token){
-        // 删除 Redis 中的登录令牌
-        return userService.logout(token);
+    @GetMapping("/status/{orderId}")
+    public Result queryOrderStatus(@PathVariable("orderId") Long orderId) {
+        return voucherOrderService.queryOrderStatus(orderId);
     }
 
-    @GetMapping("/me")
-    public Result me(){
-        // 获取当前登录的用户并返回
-        UserDTO user = UserHolder.getUser();
-        return Result.ok(user);
+    @GetMapping("/{orderId}")
+    public Result queryOrderDetail(@PathVariable("orderId") Long orderId) {
+        return voucherOrderService.queryOrderDetail(orderId);
     }
 
-    @GetMapping("/info/{id}")
-    public Result info(@PathVariable("id") Long userId){
-        // 查询详情
-        UserInfo info = userInfoService.getById(userId);
-        if (info == null) {
-            // 没有详情，应该是第一次查看详情
-            return Result.ok();
-        }
-        info.setCreateTime(null);
-        info.setUpdateTime(null);
-        // 返回
-        return Result.ok(info);
+    @PostMapping("/{orderId}/pay")
+    public Result payOrder(@PathVariable("orderId") Long orderId,
+                           @RequestParam(value = "payType", defaultValue = "1") Integer payType) {
+        return voucherOrderService.payOrder(orderId, payType);
     }
 
-    @GetMapping("/{id}")
-    public Result queryUserById(@PathVariable("id") Long userId){
-        // 查询详情
-        User user = userService.getById(userId);
-        if (user == null) {
-            return Result.ok();
-        }
-        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-        // 返回
-        return Result.ok(userDTO);
+    @PostMapping("/{orderId}/cancel")
+    public Result cancelOrder(@PathVariable("orderId") Long orderId) {
+        return voucherOrderService.cancelOrder(orderId);
     }
 
-    @PostMapping("/sign")
-    public Result sign(){
-        return userService.sign();
+    @PostMapping("/{orderId}/use")
+    public Result useOrder(@PathVariable("orderId") Long orderId) {
+        return voucherOrderService.useOrder(orderId);
     }
 
-    @GetMapping("/sign/count")
-    public Result signCount(){
-        return userService.signCount();
+    @PostMapping("/{orderId}/refund")
+    public Result refundOrder(@PathVariable("orderId") Long orderId) {
+        return voucherOrderService.refundOrder(orderId);
     }
 }

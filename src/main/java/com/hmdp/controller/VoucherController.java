@@ -1,5 +1,6 @@
 package com.hmdp.controller;
 
+import com.hmdp.annotation.AdminOnly;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Voucher;
 import com.hmdp.service.IVoucherService;
@@ -19,6 +20,7 @@ public class VoucherController {
      * @param voucher 优惠券信息，包含秒杀信息
      * @return 优惠券id
      */
+    @AdminOnly
     @PostMapping("seckill")
     public Result addSeckillVoucher(@RequestBody Voucher voucher) {
         voucherService.addSeckillVoucher(voucher);
@@ -30,6 +32,7 @@ public class VoucherController {
      * @param voucher 优惠券信息
      * @return 优惠券id
      */
+    @AdminOnly
     @PostMapping
     public Result addVoucher(@RequestBody Voucher voucher) {
         voucherService.save(voucher);

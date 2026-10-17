@@ -2,40 +2,55 @@ package com.hmdp.vo;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
-import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
+import java.time.LocalDateTime;
 
 /**
- * 抢购结果轮询视图：订单落库前只有排队状态
+ * 订单列表与详情视图，联表补齐优惠券与商铺信息
  */
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class OrderStatusVO implements Serializable {
+public class OrderVO implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     /**
-     * PENDING 排队中 / CREATED 已落库 / FAILED 抢购失败 / NOT_FOUND 订单不存在
+     * 订单id 由时间戳左移 32 位生成，超出 JS 安全整数范围，必须序列化成字符串
      */
-    private String state;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long id;
+
+    private Long userId;
+
+    private Long voucherId;
 
     /**
-     * 仅 state 为 CREATED 时有值
+     * 1 未支付 2 已支付 3 已核销 4 已取消 5 退款中 6 已退款
      */
     private Integer status;
 
-    /**
-     * 仅 state 为 FAILED 时有值：失败原因（库存不足 / 不能重复下单等）
-     */
-    private String failReason;
+    private Integer payType;
 
-    /**
-     * 超出 JS 安全整数范围，序列化成字符串
-     */
-    @JsonSerialize(using = ToStringSerializer.class)
-    private Long orderId;
+    private LocalDateTime createTime;
+
+    private LocalDateTime payTime;
+
+    private LocalDateTime useTime;
+
+    private LocalDateTime refundTime;
+
+    private String title;
+
+    private String subTitle;
+
+    private String rules;
+
+    private Long payValue;
+
+    private Long actualValue;
+
+    private Long shopId;
+
+    private String shopName;
 }

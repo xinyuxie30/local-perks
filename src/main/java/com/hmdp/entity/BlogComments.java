@@ -54,9 +54,10 @@ public class BlogComments implements Serializable {
     private Integer liked;
 
     /**
-     * 状态，0：正常，1：被举报，2：禁止查看
+     * 状态，0：正常，1：被举报，2：禁止查看。
+     * 用 Integer 而不是 Boolean，否则 2（禁止查看）会被映射成 true，无法表达三种状态
      */
-    private Boolean status;
+    private Integer status;
 
     /**
      * 创建时间
