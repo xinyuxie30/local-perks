@@ -11,15 +11,77 @@
   <link href="./css/main.css" rel="stylesheet">
 
   <style type="text/css">
+    .sort-item.active {
+      color: #ff6633;
+      font-weight: bold;
+    }
 
+    .shop-img img {
+      object-fit: cover;
+      background: #f2f2f2;
+    }
+
+    .list-empty {
+      width: 100%;
+      text-align: center;
+      color: #82848a;
+      font-size: 13px;
+      padding: 60px 20px;
+    }
+
+    .list-foot {
+      width: 100%;
+      text-align: center;
+      font-size: 12px;
+      color: #999;
+      padding: 12px 0 18px 0;
+    }
+
+    .shop-skeleton {
+      width: 100%;
+      display: flex;
+      padding: 10px;
+      background: #fff;
+      margin-bottom: 8px;
+      border-radius: 6px;
+    }
+
+    .shop-skeleton .sk-img {
+      width: 90px;
+      height: 90px;
+      border-radius: 6px;
+      flex: 0 0 auto;
+      background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 37%, #f0f0f0 63%);
+      background-size: 400% 100%;
+      animation: sk 1.4s ease infinite;
+    }
+
+    .shop-skeleton .sk-body {
+      flex: 1;
+      padding-left: 10px;
+    }
+
+    .shop-skeleton .sk-line {
+      height: 12px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 37%, #f0f0f0 63%);
+      background-size: 400% 100%;
+      animation: sk 1.4s ease infinite;
+    }
+
+    @keyframes sk {
+      0% { background-position: 100% 50%; }
+      100% { background-position: 0 50%; }
+    }
   </style>
 </head>
 <body>
 <div id="app">
   <div class="header">
     <div class="header-back-btn" @click="goBack"><i class="el-icon-arrow-left"></i></div>
-    <div class="header-title">{{typeName}}</div>
-    <div class="header-search">
+    <div class="header-title">{{typeName || '店铺列表'}}</div>
+    <div class="header-search" @click="toSearch">
       <i class="el-icon-search"></i>
     </div>
   </div>
@@ -36,32 +98,32 @@
         </el-dropdown-menu>
       </el-dropdown>
     </div>
-    <div class="sort-item" @click="sortAndQuery('')">
-      距离 <i class="el-icon-arrow-down el-icon--right"></i>
+    <div class="sort-item" :class="{active: !sortBy}" @click="changeSort('')">
+      距离
     </div>
-    <div class="sort-item" @click="sortAndQuery('comments')">
-      人气 <i class="el-icon-arrow-down el-icon--right"></i>
+    <div class="sort-item" :class="{active: sortBy === 'comments'}" @click="changeSort('comments')">
+      人气
     </div>
-    <div class="sort-item" @click="sortAndQuery('score')">
-      评分 <i class="el-icon-arrow-down el-icon--right"></i>
+    <div class="sort-item" :class="{active: sortBy === 'score'}" @click="changeSort('score')">
+      评分
     </div>
   </div>
   <div class="shop-list" @scroll="onScroll">
     <div class="shop-box" v-for="s in shops" :key="s.id" @click="toDetail(s.id)">
-      <div class="shop-img"><img :src="s.images" alt=""></div>
+      <div class="shop-img"><img :src="s.cover || '/imgs/icons/default-icon.png'" alt="" loading="lazy" @error="onImgError"></div>
       <div class="shop-info">
         <div class="shop-title shop-item">{{s.name}}</div>
-        <div class="shop-rate shop-item" >
+        <div class="shop-rate shop-item">
           <el-rate
-              disabled v-model="s.score/10"
+              disabled :value="util.formatScore(s.score)"
               text-color="#F63"
               show-score
           ></el-rate>
-          <span>{{s.comments}}条</span>
+          <span>{{s.comments || 0}}条</span>
         </div>
         <div class="shop-area shop-item">
           <span>{{s.area}}</span>
-          <span v-if="s.distance">{{s.distance < 1000 ? s.distance.toFixed(1) + 'm' : (s.distance/1000).toFixed(1) + 'km'}}</span>
+          <span v-if="s.distance">{{formatDistance(s.distance)}}</span>
         </div>
         <div class="shop-avg shop-item">￥{{s.avgPrice}}/人</div>
         <div class="shop-address shop-item">
@@ -69,6 +131,20 @@
           <span>{{s.address}}</span>
         </div>
       </div>
+    </div>
+    <template v-if="loading && !shops.length">
+      <div class="shop-skeleton" v-for="i in 4" :key="'sk' + i">
+        <div class="sk-img"></div>
+        <div class="sk-body">
+          <div class="sk-line" style="width: 60%"></div>
+          <div class="sk-line" style="width: 35%"></div>
+          <div class="sk-line" style="width: 80%"></div>
+        </div>
+      </div>
+    </template>
+    <div class="list-empty" v-if="!loading && !shops.length">附近 5 公里内没有这类店铺，换个类型看看吧</div>
+    <div class="list-foot" v-if="shops.length">
+      {{loading ? '加载中…' : (noMore ? '— 已经到底啦 —' : '上滑加载更多')}}
     </div>
   </div>
 </div>
@@ -83,82 +159,113 @@
     el: "#app",
     data: {
       util,
-      isReachBottom: false,
       types: [], // 类型列表
       shops: [], // 商店列表
       typeName: "",
-      params:{
+      sortBy: "",
+      loading: false,
+      noMore: false,
+      params: {
         typeId: 0,
         current: 1,
-        sortBy: "",
         x: 120.149993, // 经度
         y: 30.334229 // 纬度
       }
     },
     created() {
-      // 获取参数
-      this.params.typeId = util.getUrlParam("type");
+      this.params.typeId = util.getUrlParam("type") || 1;
       this.typeName = util.getUrlParam("name");
-      // 查询类型
       this.queryTypes();
-      // 查询商店
-      this.queryShops();
+      this.queryShops(true);
     },
     methods: {
       queryTypes() {
         axios.get("/shop-type/list")
           .then(({data}) => {
-            this.types = data;
+            this.types = data || [];
           })
-          .catch(err => {
-            console.log(err);
-            this.$message.error(err)
-          })
+          .catch(err => this.$message.error(err))
       },
-      queryShops() {
-        axios.get("/shop/of/type", {
-            params: this.params
-          })
+      queryShops(reset) {
+        if (this.loading) {
+          return;
+        }
+        if (reset) {
+          this.params.current = 1;
+          this.shops = [];
+          this.noMore = false;
+        }
+        if (this.noMore) {
+          return;
+        }
+        this.loading = true;
+        const params = {
+          typeId: this.params.typeId,
+          current: this.params.current,
+          x: this.params.x,
+          y: this.params.y
+        };
+        // 「距离」排序走 GEO，其余排序由后端按字段排序
+        if (this.sortBy) {
+          params.sortBy = this.sortBy;
+        }
+        axios.get("/shop/of/type", {params})
           .then(({data}) => {
-            if (!data) {
-              return
-            }
-            data.forEach(s => s.images = s.images.split(',')[0]);
-            this.shops = this.shops.concat(data);
+            const rows = (data || []).map(s => {
+              s.cover = util.firstImage(s.images);
+              return s;
+            });
+            const exists = {};
+            this.shops.forEach(s => exists[s.id] = true);
+            this.shops = this.shops.concat(rows.filter(s => !exists[s.id]));
+            // 后端每页 10 条，不足说明到底
+            this.noMore = rows.length < 10;
+            this.params.current++;
           })
           .catch(err => {
-            console.log(err);
-            this.$message.error(err)
+            this.$message.error(err);
+            this.noMore = true;
           })
+          .finally(() => this.loading = false)
+      },
+      changeSort(sortBy) {
+        if (this.sortBy === sortBy) {
+          return;
+        }
+        this.sortBy = sortBy;
+        this.queryShops(true);
       },
       handleCommand(t) {
-        location.href = "/shop-list.html?type="+t.id+"&name="+t.name;
-      },
-      sortAndQuery(sortBy) {
-        this.params.sortBy = sortBy;
-        this.queryShops();
+        location.href = "/shop-list.html?type=" + t.id + "&name=" + encodeURIComponent(t.name);
       },
       goBack() {
         history.back();
       },
+      toSearch() {
+        location.href = "/index.html";
+      },
       toDetail(id) {
-        location.href = "/shop-detail.html?id="+id
+        location.href = "/shop-detail.html?id=" + id
+      },
+      formatDistance(distance) {
+        const n = Number(distance);
+        if (isNaN(n)) {
+          return "";
+        }
+        return n < 1000 ? n.toFixed(0) + "m" : (n / 1000).toFixed(1) + "km";
+      },
+      onImgError(e) {
+        util.imgFallback(e);
       },
       onScroll(e) {
-        let scrollTop = e.target.scrollTop;
-        let offsetHeight = e.target.offsetHeight;
-        let scrollHeight = e.target.scrollHeight;
-        if(scrollTop + offsetHeight + 1 > scrollHeight && !this.isReachBottom){
-          this.isReachBottom = true
-          console.log("触底")
-          this.params.current++
-          this.queryShops(this.params.current, 5);
-        }else{
-          this.isReachBottom = false
+        const el = e.target;
+        if (el.scrollTop + el.clientHeight + 120 >= el.scrollHeight) {
+          this.queryShops(false);
         }
-      },
+      }
     }
   })
 </script>
+<script src="/js/assistant-entry.js"></script>
 </body>
 </html>

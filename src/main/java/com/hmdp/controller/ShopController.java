@@ -2,6 +2,7 @@ package com.hmdp.controller;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hmdp.annotation.AdminOnly;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.service.IShopService;
@@ -32,6 +33,7 @@ public class ShopController {
      * @param shop 商铺数据
      * @return 商铺id
      */
+    @AdminOnly
     @PostMapping
     public Result saveShop(@RequestBody Shop shop) {
         // 写入数据库
@@ -45,6 +47,7 @@ public class ShopController {
      * @param shop 商铺数据
      * @return 无
      */
+    @AdminOnly
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
         // 写入数据库
@@ -62,9 +65,10 @@ public class ShopController {
             @RequestParam("typeId") Integer typeId,
             @RequestParam(value = "current", defaultValue = "1") Integer current,
             @RequestParam(value = "x", required = false) Double x,
-            @RequestParam(value = "y", required = false) Double y
+            @RequestParam(value = "y", required = false) Double y,
+            @RequestParam(value = "sortBy", required = false) String sortBy
     ) {
-       return shopService.queryShopByType(typeId, current, x, y);
+       return shopService.queryShopByType(typeId, current, x, y, sortBy);
     }
 
     /**
@@ -78,9 +82,20 @@ public class ShopController {
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "current", defaultValue = "1") Integer current
     ) {
+        if (current == null || current < 1 || current > SystemConstants.MAX_PAGE_NUMBER) {
+            return Result.fail("页码不合法");
+        }
+        String keyword = StrUtil.isBlank(name) ? null : name.trim();
+        if (keyword != null && keyword.length() > 50) {
+            return Result.fail("搜索关键字过长");
+        }
+        if (keyword != null) {
+            // 转义 LIKE 通配符，避免用户输入 % 或 _ 时把全表捞出来
+            keyword = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+        }
         // 根据类型分页查询
         Page<Shop> page = shopService.query()
-                .like(StrUtil.isNotBlank(name), "name", name)
+                .like(keyword != null, "name", keyword)
                 .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 返回数据
         return Result.ok(page.getRecords());

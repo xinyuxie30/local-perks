@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hmdp.mapper.BlogCommentsMapper">
+
+    <sql id="commentColumns">
+        c.`id`           AS id,
+        c.`user_id`      AS userId,
+        c.`blog_id`      AS blogId,
+        c.`parent_id`    AS parentId,
+        c.`answer_id`    AS answerId,
+        c.`content`      AS content,
+        c.`liked`        AS liked,
+        c.`create_time`  AS createTime,
+        u.`nick_name`    AS nickName,
+        u.`icon`         AS icon
+    </sql>
+
+    <select id="queryTopComments" resultType="com.hmdp.vo.CommentVO">
+        SELECT
+        <include refid="commentColumns"/>
+        FROM tb_blog_comments c
+        LEFT JOIN tb_user u ON c.user_id = u.id
+        WHERE c.blog_id = #{blogId}
+          AND c.parent_id = 0
+          AND (c.status IS NULL OR c.status = 0)
+        ORDER BY c.id DESC
+    </select>
+
+    <select id="queryReplies" resultType="com.hmdp.vo.CommentVO">
+        SELECT
+        <include refid="commentColumns"/>,
+        au.`nick_name` AS answerNickName
+        FROM tb_blog_comments c
+        LEFT JOIN tb_user u ON c.user_id = u.id
+        LEFT JOIN tb_blog_comments ac ON c.answer_id = ac.id
+        LEFT JOIN tb_user au ON ac.user_id = au.id
+        WHERE c.parent_id IN
+        <foreach collection="parentIds" item="parentId" open="(" separator="," close=")">
+            #{parentId}
+        </foreach>
+          AND (c.status IS NULL OR c.status = 0)
+        ORDER BY c.parent_id ASC, c.id ASC
+        LIMIT 1000
+    </select>
+
+    <select id="countReplies" resultType="com.hmdp.vo.CommentVO">
+        SELECT
+            c.`parent_id` AS parentId,
+            COUNT(*)      AS replyCount
+        FROM tb_blog_comments c
+        WHERE c.parent_id IN
+        <foreach collection="parentIds" item="parentId" open="(" separator="," close=")">
+            #{parentId}
+        </foreach>
+          AND (c.status IS NULL OR c.status = 0)
+        GROUP BY c.parent_id
+    </select>
+
+    <update id="refreshBlogCommentCount">
+        UPDATE tb_blog b
+        SET b.comments = (
+            SELECT COUNT(*) FROM tb_blog_comments c
+            WHERE c.blog_id = b.id AND (c.status IS NULL OR c.status = 0)
+        )
+        WHERE b.id = #{blogId}
+    </update>
+</mapper>

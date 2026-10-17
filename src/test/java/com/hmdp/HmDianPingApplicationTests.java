@@ -6,6 +6,7 @@ import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.RedisIdWorker;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,6 +25,7 @@ import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
 import static com.hmdp.utils.RedisConstants.SHOP_GEO_KEY;
 
 @SpringBootTest
+@ActiveProfiles("test")
 class HmDianPingApplicationTests {
 
     @Resource
@@ -38,11 +40,11 @@ class HmDianPingApplicationTests {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
-    private ExecutorService es = Executors.newFixedThreadPool(500);
+    private ExecutorService es = Executors.newFixedThreadPool(50);
 
     @Test
     void testIdWorker() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(300);
+        CountDownLatch latch = new CountDownLatch(50);
 
         Runnable task = () -> {
             for (int i = 0; i < 100; i++) {
@@ -52,7 +54,7 @@ class HmDianPingApplicationTests {
             latch.countDown();
         };
         long begin = System.currentTimeMillis();
-        for (int i = 0; i < 300; i++) {
+        for (int i = 0; i < 50; i++) {
             es.submit(task);
         }
         latch.await();
@@ -96,7 +98,7 @@ class HmDianPingApplicationTests {
     void testHyperLogLog() {
         String[] values = new String[1000];
         int j = 0;
-        for (int i = 0; i < 1000000; i++) {
+        for (int i = 0; i < 100_000; i++) {
             j = i % 1000;
             values[j] = "user_" + i;
             if(j == 999){

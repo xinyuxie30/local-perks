@@ -20,6 +20,38 @@
     .liked{
 
     }
+    /* 评论模块 */
+    .comment-editor { padding: 8px 12px 12px; }
+    .comment-editor textarea {
+      width: 100%; height: 62px; resize: none; border: 1px solid #ececec; border-radius: 8px;
+      padding: 8px 10px; font-size: 13px; font-family: inherit; outline: none; box-sizing: border-box;
+    }
+    .comment-editor textarea:focus { border-color: #ff6633; }
+    .comment-editor-bar { display: flex; align-items: center; margin-top: 8px; }
+    .comment-editor-bar .hint { font-size: 12px; color: #999; }
+    .comment-editor-bar .hint a { color: #ff6633; margin-left: 6px; }
+    .comment-editor-bar .btn-send {
+      margin-left: auto; border: none; background: #ff6633; color: #fff; font-size: 13px;
+      padding: 6px 16px; border-radius: 15px; cursor: pointer;
+    }
+    .comment-editor-bar .btn-send:disabled { background: #ffc9b5; cursor: not-allowed; }
+    .comment-text { padding: 5px 0; font-size: 14px; line-height: 1.6; word-break: break-word; }
+    .comment-ops { display: flex; gap: 16px; font-size: 12px; color: #999; margin-top: 4px; }
+    .comment-ops span { cursor: pointer; }
+    .comment-ops .danger { color: #ff4d4f; }
+    .comment-replies { background: #fafafa; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+    .reply-item { font-size: 13px; color: #555; line-height: 1.6; padding: 3px 0; }
+    .reply-item b { color: #333; font-weight: 600; }
+    .reply-like { color: #bbb; font-size: 11px; margin-left: 6px; cursor: pointer; }
+    .reply-more { font-size: 12px; color: #ff6633; margin-top: 6px; }
+    .comment-empty { text-align: center; color: #bbb; font-size: 13px; padding: 24px 0; }
+
+    /* 图片区原来占 85% 屏高，正文和评论全被挤到首屏外；限制高度并等比裁切 */
+    .blog-info-box { height: 46vh; max-height: 420px; background: #000; }
+    .blog-info-box .swiper-item img { object-fit: cover; }
+    /* 正文按纯文本渲染（原来的 v-html 会把用户输入当标签执行） */
+    .blog-text { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 1.7; color: #333; }
+    .basic .logout-btn { white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -53,8 +85,7 @@
       </div>
 
     </div>
-    <div class="blog-text" v-html="blog.content">
-    </div>
+    <div class="blog-text">{{blog.content}}</div>
     <div class="shop-basic">
       <div class="shop-icon">
         <img :src="shop.image" alt="">
@@ -85,49 +116,41 @@
     <div class="blog-divider"></div>
     <div class="blog-comments">
       <div class="comments-head">
-        <div>网友评价 <span>（119）</span></div>
-        <div><i class="el-icon-arrow-right"></i></div>
+        <div>网友评价 <span>（{{commentTotal}}）</span></div>
+      </div>
+      <div class="comment-editor">
+        <textarea v-model="commentText" maxlength="200" :placeholder="replyTarget ? ('回复 @' + (replyTarget.nickName || '匿名用户')) : '说点什么…'"></textarea>
+        <div class="comment-editor-bar">
+          <span class="hint">
+            <template v-if="replyTarget">回复 @{{replyTarget.nickName}}<a @click="replyTarget = null">取消</a></template>
+            <template v-else-if="!user || !user.id">登录后才能发表评论</template>
+          </span>
+          <button class="btn-send" :disabled="!commentText.trim()" @click="submitComment">发表</button>
+        </div>
       </div>
       <div class="comment-list">
-        <div class="comment-box" v-for="i in 3" :key="i">
+        <div class="comment-box" v-for="c in comments" :key="c.id">
           <div class="comment-icon">
-            <img
-                src="https://p0.meituan.net/userheadpicbackend/57e44d6eba01aad0d8d711788f30a126549507.jpg%4048w_48h_1e_1c_1l%7Cwatermark%3D0"
-                alt="">
+            <img :src="c.icon || '/imgs/icons/default-icon.png'" alt="">
           </div>
           <div class="comment-info">
-            <div class="comment-user">叶小乙 <span>Lv5</span></div>
-            <div style="display: flex;">
-              打分
-              <el-rate disabled v-model="4.5"></el-rate>
+            <div class="comment-user">{{c.nickName || '匿名用户'}}</div>
+            <div class="comment-text">{{c.content}}</div>
+            <div class="comment-ops">
+              <span @click="likeComment(c)"><i class="el-icon-thumb"></i> {{c.liked || 0}}</span>
+              <span @click="startReply(c)">回复</span>
+              <span v-if="user && user.id === c.userId" class="danger" @click="removeComment(c)">删除</span>
             </div>
-            <div style="padding: 5px 0; font-size: 14px">
-              某平台上买的券，价格可以当工作餐吃，虽然价格便宜，但是这家店一点都没有...
-            </div>
-            <div class="comment-images">
-              <img
-                  src="https://qcloud.dpfile.com/pc/6T7MfXzx7USPIkSy7jzm40qZSmlHUF2jd-FZUL6WpjE9byagjLlrseWxnl1LcbuSGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-              <img
-                  src="https://qcloud.dpfile.com/pc/sZ5q-zgglv4VXEWU71xCFjnLM_jUHq-ylq0GKivtrz3JksWQ1f7oBWZsxm1DWgcaGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-              <img
-                  src="https://qcloud.dpfile.com/pc/xZy6W4NwuRFchlOi43DVLPFsx7KWWvPqifE1JTe_jreqdsBYA9CFkeSm2ZlF0OVmGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-              <img
-                  src="https://qcloud.dpfile.com/pc/xZy6W4NwuRFchlOi43DVLPFsx7KWWvPqifE1JTe_jreqdsBYA9CFkeSm2ZlF0OVmGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-            </div>
-            <div>
-              浏览641 &nbsp;&nbsp;&nbsp;&nbsp;评论5
+            <div class="comment-replies" v-if="c.replies && c.replies.length">
+              <div class="reply-item" v-for="r in c.replies" :key="r.id">
+                <b>{{r.nickName || '匿名用户'}}</b><template v-if="r.answerNickName"> 回复 <b>{{r.answerNickName}}</b></template>：{{r.content}}
+                <span class="reply-like" @click="likeComment(r)">赞 {{r.liked || 0}}</span>
+              </div>
+              <div class="reply-more" v-if="c.replyCount > c.replies.length">共 {{c.replyCount}} 条回复</div>
             </div>
           </div>
         </div>
-        <div
-            style="display: flex; justify-content: space-between;padding: 15px 0; border-top: 1px solid #f1f1f1; margin-top: 10px;">
-          <div>查看全部119条评价</div>
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
+        <div class="comment-empty" v-if="!comments.length">还没有评论，来说第一句吧</div>
       </div>
     </div>
     <div class="blog-divider"></div>
@@ -168,6 +191,10 @@
       likes: [],
       user: {}, // 登录用户
       followed: false, // 是否关注了
+      comments: [],
+      commentTotal: 0,
+      commentText: "",
+      replyTarget: null,
       _width: 0,
       duration: 300,
       container: null,
@@ -211,42 +238,94 @@
       queryBlogById(id) {
         axios.get("/blog/" + id)
           .then(({data}) => {
-            data.images = data.images.split(",")
+            data.images = data.images ? data.images.split(",") : []
             this.blog = data;
             this.$nextTick(this.init);
             this.queryShopById(data.shopId)
             this.queryLikeList(id);
             this.queryLoginUser();
+            this.queryComments();
           })
           .catch(this.$message.error)
+      },
+      queryComments() {
+        if (!this.blog.id) return;
+        axios.get("/blog-comments/of/blog/" + this.blog.id, { params: { current: 1 } })
+          .then(({ data, total }) => {
+            this.comments = data || [];
+            this.commentTotal = total || this.comments.length;
+          })
+          .catch(() => { this.comments = []; this.commentTotal = 0; });
+      },
+      startReply(c) {
+        this.replyTarget = c;
+      },
+      submitComment() {
+        if (!this.user || !this.user.id) {
+          this.$message.error("请先登录");
+          return;
+        }
+        const content = this.commentText.trim();
+        if (!content) return;
+        const body = { blogId: this.blog.id, content: content };
+        if (this.replyTarget) {
+          body.parentId = this.replyTarget.parentId || this.replyTarget.id;
+          body.answerId = this.replyTarget.id;
+        }
+        axios.post("/blog-comments", body)
+          .then(() => {
+            this.$message.success("评论成功");
+            this.commentText = "";
+            this.replyTarget = null;
+            this.queryComments();
+          })
+          .catch(err => this.$message.error(err));
+      },
+      likeComment(c) {
+        axios.post("/blog-comments/" + c.id + "/like")
+          .then(() => this.queryComments())
+          .catch(err => this.$message.error(err));
+      },
+      removeComment(c) {
+        axios.delete("/blog-comments/" + c.id)
+          .then(() => {
+            this.$message.success("已删除");
+            this.queryComments();
+          })
+          .catch(err => this.$message.error(err));
       },
       queryShopById(shopId) {
         axios.get("/shop/" + shopId)
           .then(({data}) => {
-            data.image = data.images.split(",")[0]
+            data.image = util.firstImage(data.images)
             this.shop = data
           })
           .catch(this.$message.error)
       },
       queryLikeList(id){
         axios.get("/blog/likes/" + id)
-          .then(({data}) => this.likes = data)
+          .then(({data}) => this.likes = data || [])
           .catch(this.$message.error)
       },
       addLike(){
-        axios.put("/blog/like/" +this.blog.id)
+        if (!util.isLogin()) {
+          this.$message.warning("登录后就可以点赞啦");
+          setTimeout(() => location.href = "/login.html", 600);
+          return;
+        }
+        if (this._liking) {
+          return;
+        }
+        this._liking = true;
+        axios.put("/blog/like/" + this.blog.id)
           .then(({data}) => {
-            axios.get("/blog/" + this.blog.id)
-              .then(({data}) => {
-                data.images = data.images.split(",")
-                this.blog = data;
-                this.queryLikeList(this.blog.id);
-              })
-              .catch(this.$message.error)
+            // true 表示本次点赞，false 表示取消
+            this.blog.isLike = data === true;
+            this.blog.liked = Math.max((this.blog.liked || 0) + (this.blog.isLike ? 1 : -1), 0);
+            this.queryLikeList(this.blog.id);
           })
-          .catch(err => {
-            this.$message.error(err)
-          })
+          .catch(err => this.$message.error(err))
+          .finally(() => this._liking = false);
       },
       isFollowed(){
         axios.get("/follow/or/not/" + this.blog.userId)
@@ -384,5 +463,6 @@
     }
   })
 </script>
+<script src="/js/assistant-entry.js"></script>
 </body>
 </html>
