@@ -67,6 +67,24 @@ public class AdminServiceImpl implements IAdminService {
         String stockKey = SECKILL_STOCK_KEY + voucherId;
         String existing = stringRedisTemplate.opsForValue().get(stockKey);
         boolean writeStock = existing == null || force;
+        if (writeStock && force && existing != null) {
+            // force 覆盖是危险操作（审计 2026-10-18 P1-3）：异步订单尚未落库时 Redis/DB 本就允许短暂不一致，
+            // 直接用 DB 库存覆盖会吞掉正常扣减。只允许在「无进行中占用」时覆盖——
+            // Redis 无占用标记且订单表无未完成订单，说明活动已暂停/排空，此时覆盖才安全
+            Long occupied = stringRedisTemplate.opsForSet().size(SECKILL_ORDER_KEY + voucherId);
+            long consuming = voucherOrderService.query()
+                    .eq("voucher_id", voucherId)
+                    .in("status", java.util.Arrays.asList(OrderStatus.UNPAID, OrderStatus.PAID,
+                            OrderStatus.USED, OrderStatus.REFUNDING, OrderStatus.REFUNDED))
+                    .count();
+            if ((occupied != null && occupied > 0) || consuming > 0) {
+                log.warn("拒绝 force 覆盖 Redis 库存：存在进行中的订单占用，voucherId={}，redis占用={}，db占用={}",
+                        voucherId, occupied == null ? 0L : occupied, consuming);
+                return Result.fail("该券存在进行中的订单占用（Redis 占用 " + (occupied == null ? 0L : occupied)
+                        + "，订单表占用 " + consuming + "），拒绝覆盖 Redis 库存。"
+                        + "请先暂停活动并等待订单收敛（支付/核销/取消完成），再用 stats 查看差异。");
+            }
+        }
         if (writeStock) {
             stringRedisTemplate.opsForValue().set(stockKey, String.valueOf(seckill.getStock()));
         } else if (!existing.equals(String.valueOf(seckill.getStock()))) {
