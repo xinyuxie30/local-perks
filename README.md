@@ -41,6 +41,7 @@ Java 8 · Spring Boot 2.3.12 · MyBatis-Plus 3.4.3 · Spring Data Redis 2.6.2 ·
 2. 创建 hmdp 开发数据库，导入 src/main/resources/db/hmdp.sql。脚本会重建同名表。
 3. 在同一个库上导入交易链路增量脚本 src/main/resources/db/V2__trade.sql，它会补上
    `(user_id, voucher_id)` 唯一索引、关单扫描索引和库存对账用的 `total_stock` 列。
+   评论功能还需导入 `src/main/resources/db/V3__comment.sql`。
 4. 参考 .env.example，在终端或 IDE 中配置 DB_PASSWORD、DB_USER、DB_URL 和 REDIS_HOST、REDIS_PORT、REDIS_PASSWORD。应用不会自动读取 .env 文件。
 5. 启动 RocketMQ 的 NameServer 与 Broker，步骤见 [deploy/rocketmq/README.md](deploy/rocketmq/README.md)：
 
@@ -85,6 +86,10 @@ New-Item -ItemType Directory -Force nginx-1.18.0/logs, nginx-1.18.0/temp
 本地演示改成 `3`（10 秒）即可快速观察自动关单；`trade.reconcile-cron` 控制对账任务频率，
 对账以订单表为账本校正 Redis 与 MySQL 库存并兜底补关单。
 
+库存对账默认只观测差异（`trade.reconcile.auto-fix=false`）；修复模式仅供暂停活动并排空交易后使用。
+管理端库存预热会原子检查 Redis 占用与库存快照；已有任何订单记录的券，即使 Redis 库存键丢失或
+传入 `force=true` 也拒绝重置，需走暂停活动、核对账本的维护流程，保留终身一单资格。
+
 ## 构建
 
 ~~~text
@@ -93,9 +98,28 @@ mvn -DskipTests package
 
 现有集成测试依赖 MySQL 和 Redis，部分测试会写入数据，请使用独立测试环境。
 
+新增模块回归可单独运行：
+
+~~~powershell
+# 不连接数据库、Redis 或 MQ 的预热服务单元测试
+mvn -Dtest=AdminWarmupTest test
+# 不连接外部服务的缓存链路与布隆降级回归（业务工程使用 JDK 8）
+mvn "-Dtest=ShopCacheLookupTest,ShopBloomFilterTest" test
+# 连接 application-test.yaml 指定的 Redis，仅操作随机测试键并清理
+$env:RUN_REDIS_SCRIPT_TESTS = 'true'
+mvn -Dtest=StockWarmupScriptTest test
+# 安装 Playwright 后运行浏览器回归；需要已安装 Chrome
+node --test tests/frontend-regression.cjs
+~~~
+
+浏览器回归使用真实页面和模拟接口，覆盖连续审批、中文输入、会话隔离、SSE 分片、列表竞态与重试。
+可用 `PLAYWRIGHT_MODULE` 环境变量指定已有 Playwright 模块路径；它不能替代真实模型和交易链路验收。
+
+后端改进、前置知识与 Claude Code 执行契约的对应关系见 [2026-10-19 后端与 Agent 复核](docs/backend-agent-review-2026-10-19.md)。
+
 ## 待完善
 
 - 支付为模拟实现，未对接真实支付渠道；申请退款直接落到已退款，未经过「退款中」状态。
-- 商铺、优惠券、上传接口的角色权限（当前仅校验登录，不区分商家/普通用户）。
+- 商铺与优惠券管理写接口已有管理员校验；商家角色、门店归属与真实商家核销仍待建模。
 - 验证码仅输出到开发日志，未接短信通道。
 - 智能助手暂未接入语音与多模态，知识库为本地 JSON 存储。

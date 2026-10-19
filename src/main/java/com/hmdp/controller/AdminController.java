@@ -24,7 +24,8 @@ public class AdminController {
     private IAdminService adminService;
 
     /**
-     * 预热秒杀券。force=true 时以数据库库存覆盖 Redis，用于 Redis 数据丢失后的恢复
+     * 预热无订单、无占用的秒杀券。force=true 也不能绕过购买资格和库存快照检查；
+     * 已有订单的活动需暂停后核对账本，不能通过预热恢复。
      */
     @PostMapping("/seckill/{voucherId}/warmup")
     public Result warmUpSeckill(@PathVariable("voucherId") Long voucherId,

@@ -63,14 +63,14 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (id == null || id <= 0) {
             return Result.fail("店铺id不合法");
         }
-        // L0：布隆过滤器，挡掉一定不存在的 id，避免打穿到 Redis/DB
-        if (!shopBloomFilter.mightContain(id)) {
-            return Result.fail("店铺不存在！");
-        }
-        // L1：进程内 Caffeine，命中直接返回
+        // L1：命中时完全不访问 Redis（布隆过滤器本身也存储在 Redis）。
         Shop local = shopLocalCache.get(id);
         if (local != null) {
             return Result.ok(local);
+        }
+        // L1 未命中后再用布隆过滤器拦截不存在的 id。
+        if (!shopBloomFilter.mightContain(id)) {
+            return Result.fail("店铺不存在！");
         }
         // L2：Redis 空值缓存 + 穿透兜底；未命中再查 DB
         Shop shop = cacheClient.queryWithPassThrough(

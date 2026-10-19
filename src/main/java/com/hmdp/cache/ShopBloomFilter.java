@@ -16,7 +16,8 @@ import static com.hmdp.utils.RedisConstants.SHOP_BLOOM_KEY;
 
 /**
  * 店铺 id 布隆过滤器，挡在不存在的 id 之前，减轻缓存穿透。
- * Redis 不可用时 fail-open：放行到空值缓存链路，绝不因为过滤器故障误伤真实店铺。
+ * 过滤器异常时 fail-open：本实例停用过滤，交由空值缓存链路判断店铺是否存在。
+ * 完整加载成功后才恢复过滤；其他实例的覆盖状态需要另外协调。
  */
 @Slf4j
 @Component
@@ -60,7 +61,9 @@ public class ShopBloomFilter {
         try {
             return filter().contains(shopId);
         } catch (Exception e) {
-            log.warn("布隆过滤器查询失败，本次放行：shopId={}，reason={}", shopId, e.getMessage());
+            // 故障期间可能丢失新增 id，连接恢复不等于覆盖完整。
+            available = false;
+            log.warn("布隆过滤器查询失败，停用过滤直至重新加载：shopId={}，reason={}", shopId, e.getMessage());
             return true;
         }
     }
@@ -72,7 +75,9 @@ public class ShopBloomFilter {
         try {
             filter().add(shopId);
         } catch (Exception e) {
-            log.warn("布隆过滤器写入失败，shopId={}，reason={}", shopId, e.getMessage());
+            // 数据库可能已提交，不能继续用不完整的过滤器拒绝这家真实店铺。
+            available = false;
+            log.warn("布隆过滤器写入失败，停用过滤直至重新加载：shopId={}，reason={}", shopId, e.getMessage());
         }
     }
 

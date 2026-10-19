@@ -7,7 +7,7 @@ Vue.component("footBar", {
     </div>
     <div class="foot-box" :class="{active: activeBtn === 2}" @click="toPage(2)">
       <div class="foot-view"><i class="el-icon-map-location"></i></div>
-      <div class="foot-text">地图</div>
+      <div class="foot-text">找店</div>
     </div>
     <div class="foot-box" @click="toPage(0)">
       <img class="add-btn" src="/imgs/add.png" alt="">
@@ -35,6 +35,8 @@ Vue.component("footBar", {
         location.href = "/info.html"
       } else if (i === 3) {
         location.href = "/order.html"
+      } else if (i === 2) {
+        location.href = "/shop-list.html"
       } else if (i === 1){
         location.href = "/"
       }

@@ -549,6 +549,7 @@
     authToken: null,
     controller: null,
     busy: false,
+    generation: 0,
     agentsLoaded: false,
     memoryLoaded: false,
     drawerTab: null,
@@ -668,6 +669,8 @@
         p.push(lines[i]);
         i++;
       }
+      // 单独的管道行未构成表格时也必须前进，避免 Markdown 渲染死循环。
+      if (!p.length) { p.push(lines[i]); i++; }
       out.push('<p>' + inlineMd(p.join('<br>')) + '</p>');
     }
     return out.join('');
@@ -816,7 +819,8 @@
     state.busy = busy;
     sendEl.textContent = busy ? '■' : '↑';
     sendEl.className = 'send-btn' + (busy ? ' stop' : '');
-    sendEl.title = busy ? '停止生成' : '发送';
+    sendEl.title = busy ? (state.controller ? '停止生成' : '操作处理中') : '发送';
+    sendEl.disabled = busy ? !state.controller : !inputEl.value.trim();
     statusEl.className = 'tb-status' + (busy ? ' busy' : '');
     statusText.textContent = busy ? (label || '思考中') : '在线';
   }
@@ -832,18 +836,19 @@
   }
 
   /* ================= SSE ================= */
-  function readSse(resp, handlers) {
+  function readSse(resp, handlers, isCurrent) {
     var reader = resp.body.getReader();
     var decoder = new TextDecoder('utf-8');
     var buffer = '';
     function pump() {
       return reader.read().then(function (chunk) {
+        if (isCurrent && !isCurrent()) { return reader.cancel(); }
         if (chunk.done) { return; }
         buffer += decoder.decode(chunk.value, { stream: true });
-        var idx;
-        while ((idx = buffer.indexOf('\n\n')) >= 0) {
-          var raw = buffer.slice(0, idx);
-          buffer = buffer.slice(idx + 2);
+        var boundary;
+        while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+          var raw = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary[0].length);
           var event = 'message', data = [];
           raw.split('\n').forEach(function (line) {
             if (line.indexOf('event:') === 0) { event = line.slice(6).trim(); }
@@ -863,6 +868,10 @@
   function send(text) {
     text = (text || '').trim();
     if (!text || state.busy) { return; }
+    var generation = state.generation;
+    var controller = new AbortController();
+    state.controller = controller;
+    function isCurrent() { return generation === state.generation; }
     hideHero();
     setBusy(true, '思考中');
     state.autoScroll = true;
@@ -874,11 +883,10 @@
     var bot = addBotMsg();
     var pendingTools = {};
     var pendingSubs = {};
-    state.controller = new AbortController();
     var finished = false;
 
     function finalize() {
-      if (finished) { return; }
+      if (finished || !isCurrent()) { return; }
       finished = true;
       bot.finish();
     }
@@ -886,7 +894,7 @@
     fetch('/cs-api/chat/agent/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-      signal: state.controller.signal,
+      signal: controller.signal,
       body: JSON.stringify({
         message: text,
         user_id: state.userId,
@@ -894,6 +902,7 @@
         auth_token: state.authToken
       })
     }).then(function (resp) {
+      if (!isCurrent()) { return; }
       if (!resp.ok) {
         return resp.text().then(function (detail) {
           throw new Error('HTTP ' + resp.status + (detail ? '：' + detail.slice(0, 140) : ''));
@@ -947,10 +956,11 @@
           finalize();
         },
         ping: function () {}
-      });
+      }, isCurrent);
     }).then(function () {
       finalize();
     }).catch(function (err) {
+      if (!isCurrent()) { return; }
       if (err && err.name === 'AbortError') {
         if (!bot.text) { bot.setText('（已停止）'); }
         finalize();
@@ -962,6 +972,7 @@
         statusText.textContent = '服务未启动';
       }
     }).then(function () {
+      if (!isCurrent()) { return; }
       state.controller = null;
       if (!state.busy) { return; }
       setBusy(false);
@@ -983,20 +994,23 @@
       '</div></div>';
     chatInner.appendChild(el);
     scrollBottom(true);
-    el.querySelector('[data-act="yes"]').addEventListener('click', function () { approve(d.pending_token, true, el); });
-    el.querySelector('[data-act="no"]').addEventListener('click', function () { approve(d.pending_token, false, el); });
+    var conversationId = d.conversation_id || state.conversationId;
+    el.querySelector('[data-act="yes"]').addEventListener('click', function () { approve(d.pending_token, true, el, conversationId); });
+    el.querySelector('[data-act="no"]').addEventListener('click', function () { approve(d.pending_token, false, el, conversationId); });
   }
 
-  function approve(token, approved, cardEl) {
+  function approve(token, approved, cardEl, conversationId) {
+    if (state.busy) { toast('请等待当前操作完成'); return; }
     var actions = cardEl.querySelector('.aa');
-    if (actions) { actions.remove(); }
+    if (!actions || !token) { return; }
+    actions.remove();
     var bot = addBotMsg();
     setBusy(true, '处理中');
     fetch('/cs-api/chat/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        conversation_id: state.conversationId,
+        conversation_id: conversationId || state.conversationId,
         pending_token: token,
         approved: approved,
         auth_token: state.authToken
@@ -1008,8 +1022,9 @@
       bot.setText(d.response || '（已处理）');
       bot.finish();
       bot.foot.textContent = metaOf(d);
+      if (d.requires_approval && d.pending_token) { showApproval(d); }
     }).catch(function (err) {
-      bot.setText('操作处理失败（' + err.message + '）。');
+      bot.setText('操作结果暂未确认（' + err.message + '）。请先查看订单或相关业务状态，避免重复操作。');
       bot.finish();
     }).then(function () {
       setBusy(false);
@@ -1025,8 +1040,6 @@
     app.classList.add('drawer-open');
     document.getElementById('drawer').classList.add('open');
     setTab(tab);
-    if (tab === 'agents' && !state.agentsLoaded) { loadAgents(); }
-    if (tab === 'memory') { loadMemories(); }
   }
   function closeDrawer() {
     app.classList.remove('drawer-open');
@@ -1067,7 +1080,7 @@
     box.innerHTML = FUNCS.map(function (f, i) {
       return '<div class="fn-row"><div class="fi">' + f.ico + '</div>' +
         '<div class="ft"><b>' + f.title + '</b><span>' + f.desc + '</span></div>' +
-        '<div class="fa"><button class="mini-btn" data-ask-i="' + i + '">问助手</button>' +
+        '<div class="fa">' + (f.ask ? '<button class="mini-btn" data-ask-i="' + i + '">问助手</button>' : '') +
         (f.href ? '<a class="mini-btn" href="' + f.href + '">打开</a>' : '') + '</div></div>';
     }).join('');
     box.addEventListener('click', function (e) {
@@ -1265,9 +1278,13 @@
   inputEl.addEventListener('input', function () {
     resizeInput();
     charEl.textContent = inputEl.value.length + ' / 4000';
-    sendEl.disabled = !state.busy && !inputEl.value.trim();
+    sendEl.disabled = state.busy ? !state.controller : !inputEl.value.trim();
   });
+  var composing = false;
+  inputEl.addEventListener('compositionstart', function () { composing = true; });
+  inputEl.addEventListener('compositionend', function () { composing = false; });
   inputEl.addEventListener('keydown', function (e) {
+    if (composing || e.isComposing || e.keyCode === 229) { return; }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!state.busy) { send(inputEl.value); }
@@ -1288,7 +1305,11 @@
   document.getElementById('railNew').addEventListener('click', newChat);
 
   function newChat() {
+    if (state.busy && !state.controller) { toast('操作正在处理，请等待结果后再开启新对话'); return; }
+    state.generation++;
     if (state.busy && state.controller) { state.controller.abort(); }
+    state.controller = null;
+    setBusy(false);
     state.conversationId = 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     Array.prototype.forEach.call(chatInner.querySelectorAll('.msg'), function (m) { m.remove(); });
     if (hero) { hero.style.display = ''; }
@@ -1305,7 +1326,7 @@
   function health() {
     fetch('/cs-api/health').then(function (r) {
       if (!r.ok) { throw new Error('bad'); }
-      setIdle();
+      if (!state.busy) { setIdle(); }
     }).catch(function () {
       statusEl.className = 'tb-status off';
       statusText.textContent = '服务未启动';

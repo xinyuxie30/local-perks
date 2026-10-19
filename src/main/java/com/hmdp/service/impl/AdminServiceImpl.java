@@ -12,12 +12,15 @@ import com.hmdp.service.IVoucherService;
 import com.hmdp.task.TradeReconcileTask;
 import com.hmdp.utils.OrderStatus;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -31,6 +34,12 @@ import static com.hmdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 public class AdminServiceImpl implements IAdminService {
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DefaultRedisScript<Long> WARMUP_STOCK_SCRIPT = new DefaultRedisScript<>();
+
+    static {
+        WARMUP_STOCK_SCRIPT.setLocation(new ClassPathResource("warmup_stock.lua"));
+        WARMUP_STOCK_SCRIPT.setResultType(Long.class);
+    }
 
     @Resource
     private IVoucherService voucherService;
@@ -60,35 +69,30 @@ public class AdminServiceImpl implements IAdminService {
         if (voucher == null || seckill == null) {
             return Result.fail("秒杀券不存在");
         }
-        if (seckill.getTotalStock() == null || seckill.getTotalStock() <= 0) {
-            seckill.setTotalStock(seckill.getStock());
-            seckillVoucherService.updateById(seckill);
+        if (seckill.getStock() == null || seckill.getStock() < 0) {
+            return Result.fail("数据库库存不合法，请先核对库存");
         }
         String stockKey = SECKILL_STOCK_KEY + voucherId;
         String existing = stringRedisTemplate.opsForValue().get(stockKey);
         boolean writeStock = existing == null || force;
-        if (writeStock && force && existing != null) {
-            // force 覆盖是危险操作（审计 2026-10-18 P1-3）：异步订单尚未落库时 Redis/DB 本就允许短暂不一致，
-            // 直接用 DB 库存覆盖会吞掉正常扣减。只允许在「无进行中占用」时覆盖——
-            // Redis 无占用标记且订单表无未完成订单，说明活动已暂停/排空，此时覆盖才安全
-            Long occupied = stringRedisTemplate.opsForSet().size(SECKILL_ORDER_KEY + voucherId);
-            long consuming = voucherOrderService.query()
-                    .eq("voucher_id", voucherId)
-                    .in("status", java.util.Arrays.asList(OrderStatus.UNPAID, OrderStatus.PAID,
-                            OrderStatus.USED, OrderStatus.REFUNDING, OrderStatus.REFUNDED))
-                    .count();
-            if ((occupied != null && occupied > 0) || consuming > 0) {
-                log.warn("拒绝 force 覆盖 Redis 库存：存在进行中的订单占用，voucherId={}，redis占用={}，db占用={}",
-                        voucherId, occupied == null ? 0L : occupied, consuming);
-                return Result.fail("该券存在进行中的订单占用（Redis 占用 " + (occupied == null ? 0L : occupied)
-                        + "，订单表占用 " + consuming + "），拒绝覆盖 Redis 库存。"
-                        + "请先暂停活动并等待订单收敛（支付/核销/取消完成），再用 stats 查看差异。");
-            }
-        }
         if (writeStock) {
-            stringRedisTemplate.opsForValue().set(stockKey, String.valueOf(seckill.getStock()));
+            // Redis 键丢失也不能按 DB 快照重建：途中消息尚未落库时会多放库存。
+            // 历史取消订单也保留终身一单资格，恢复已有活动需要单独的维护流程。
+            long orders = voucherOrderService.query()
+                    .eq("voucher_id", voucherId)
+                    .count();
+            if (orders > 0) {
+                return Result.fail("该券已有订单记录，不能通过预热重置库存和购买资格，请先暂停活动并核对账本");
+            }
+            // 检查占用、比较库存快照与写入必须同处 Lua，防止检查后抢券插入造成超卖。
+            Long warmed = stringRedisTemplate.execute(WARMUP_STOCK_SCRIPT,
+                    Arrays.asList(stockKey, SECKILL_ORDER_KEY + voucherId),
+                    existing == null ? "" : existing, String.valueOf(seckill.getStock()));
+            if (warmed == null || warmed != 1L) {
+                return Result.fail("库存或购买资格已变化，预热已放弃，请查看最新统计后重试");
+            }
         } else if (!existing.equals(String.valueOf(seckill.getStock()))) {
-            log.warn("预热跳过：Redis 库存与 DB 不一致，voucherId={}，redis={}，db={}，可加 force=true 覆盖",
+            log.warn("预热保留现有库存：voucherId={}，redis={}，db={}，差异请通过对账核查",
                     voucherId, existing, seckill.getStock());
         }
         try {

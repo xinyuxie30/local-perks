@@ -142,8 +142,11 @@
         </div>
       </div>
     </template>
-    <div class="list-empty" v-if="!loading && !shops.length">附近 5 公里内没有这类店铺，换个类型看看吧</div>
-    <div class="list-foot" v-if="shops.length">
+    <div class="list-empty" v-if="!loading && !loadError && !shops.length">附近 5 公里内没有这类店铺，换个类型看看吧</div>
+    <div class="list-foot" v-if="loadError" role="alert">
+      加载失败，已有结果已保留。<button @click="queryShops(false)">重试</button>
+    </div>
+    <div class="list-foot" v-if="shops.length && !loadError">
       {{loading ? '加载中…' : (noMore ? '— 已经到底啦 —' : '上滑加载更多')}}
     </div>
   </div>
@@ -165,6 +168,8 @@
       sortBy: "",
       loading: false,
       noMore: false,
+      loadError: false,
+      requestVersion: 0,
       params: {
         typeId: 0,
         current: 1,
@@ -187,10 +192,11 @@
           .catch(err => this.$message.error(err))
       },
       queryShops(reset) {
-        if (this.loading) {
+        if (this.loading && !reset) {
           return;
         }
         if (reset) {
+          this.requestVersion++;
           this.params.current = 1;
           this.shops = [];
           this.noMore = false;
@@ -199,6 +205,8 @@
           return;
         }
         this.loading = true;
+        this.loadError = false;
+        const version = this.requestVersion;
         const params = {
           typeId: this.params.typeId,
           current: this.params.current,
@@ -211,6 +219,7 @@
         }
         axios.get("/shop/of/type", {params})
           .then(({data}) => {
+            if (version !== this.requestVersion) { return; }
             const rows = (data || []).map(s => {
               s.cover = util.firstImage(s.images);
               return s;
@@ -223,10 +232,11 @@
             this.params.current++;
           })
           .catch(err => {
+            if (version !== this.requestVersion) { return; }
             this.$message.error(err);
-            this.noMore = true;
+            this.loadError = true;
           })
-          .finally(() => this.loading = false)
+          .finally(() => { if (version === this.requestVersion) { this.loading = false; } })
       },
       changeSort(sortBy) {
         if (this.sortBy === sortBy) {
@@ -258,6 +268,7 @@
         util.imgFallback(e);
       },
       onScroll(e) {
+        if (this.loadError) { return; }
         const el = e.target;
         if (el.scrollTop + el.clientHeight + 120 >= el.scrollHeight) {
           this.queryShops(false);
