@@ -33,11 +33,11 @@ public class ShopLocalCache {
     }
 
     public Shop get(Long id) {
-        return cache == null || id == null ? null : cache.getIfPresent(id);
+        return !properties.isShopLocalEnabled() || cache == null || id == null ? null : cache.getIfPresent(id);
     }
 
     public void put(Long id, Shop shop) {
-        if (cache != null && id != null && shop != null) {
+        if (properties.isShopLocalEnabled() && cache != null && id != null && shop != null) {
             cache.put(id, shop);
         }
     }

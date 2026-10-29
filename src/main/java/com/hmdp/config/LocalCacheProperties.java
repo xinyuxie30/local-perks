@@ -9,6 +9,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.cache")
 public class LocalCacheProperties {
 
+    /** 本地缓存开关；用于运行期配置及严格的 L1/L2 性能对照。 */
+    private boolean shopLocalEnabled = true;
+
     /**
      * 本地缓存最大条目数，按条目数而不是字节数限制，避免堆内存无界增长
      */
