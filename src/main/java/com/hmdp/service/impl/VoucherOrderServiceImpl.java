@@ -12,6 +12,7 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.mq.SeckillOrderProducer;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
+import com.hmdp.service.StockRestoreOutboxService;
 import com.hmdp.utils.OrderStatus;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.SystemConstants;
@@ -21,21 +22,16 @@ import com.hmdp.vo.OrderVO;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.client.producer.LocalTransactionState;
 import org.apache.rocketmq.client.producer.TransactionSendResult;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.NoTransactionException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -48,19 +44,11 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    /**
-     * 回补 Redis 库存前先判断 key 是否存在，避免把已下线/未预热的券凭空补出库存
-     */
-    private static final DefaultRedisScript<Long> RESTORE_STOCK_SCRIPT;
-
-    static {
-        RESTORE_STOCK_SCRIPT = new DefaultRedisScript<>();
-        RESTORE_STOCK_SCRIPT.setLocation(new ClassPathResource("restore_stock.lua"));
-        RESTORE_STOCK_SCRIPT.setResultType(Long.class);
-    }
-
     @Resource
     private ISeckillVoucherService seckillVoucherService;
+
+    @Resource
+    private StockRestoreOutboxService stockRestoreOutboxService;
 
     @Resource
     private RedisIdWorker redisIdWorker;
@@ -195,8 +183,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (!closed) {
             return false;
         }
-        restoreStock(order.getVoucherId());
-        log.info("订单超时关闭并回补库存，orderId={}，voucherId={}", orderId, order.getVoucherId());
+        restoreStock(order);
+        log.info("订单超时关闭，MySQL 库存与 Redis 回补事件已写入当前事务，orderId={}，voucherId={}",
+                orderId, order.getVoucherId());
         return true;
     }
 
@@ -330,7 +319,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (!canceled) {
             return Result.fail("只有未支付的订单可以取消");
         }
-        restoreStock(order.getVoucherId());
+        restoreStock(order);
         return Result.ok();
     }
 
@@ -392,55 +381,26 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
 
     /**
-     * 回补库存到 MySQL 与 Redis。故意不把用户从 seckill:order 集合移除：
+     * 回补 MySQL 并写入事务发件箱；Redis 由消息消费者异步回补。
+     * 故意不把用户从 seckill:order 集合移除：
      * 终身一单语义下，取消/退款后该用户依旧不能再购买同一张券，与唯一索引保持一致
      */
-    private void restoreStock(Long voucherId) {
-        if (voucherId == null) {
-            return;
-        }
-        SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
-        Integer totalStock = voucher == null ? null : voucher.getTotalStock();
-
-        // 先回补数据库，条件里带上上限，防止异常重复调用把库存加超
+    private void restoreStock(VoucherOrder order) {
+        Long voucherId = order.getVoucherId();
+        // 与订单 CAS、事件插入同一事务。条件直接使用库存行的当前上限，避免快照过时。
         boolean updated = seckillVoucherService.update()
                 .setSql("stock = stock + 1")
                 .eq("voucher_id", voucherId)
-                .lt(totalStock != null, "stock", totalStock)
+                .ge("stock", 0)
+                .apply("stock < total_stock")
                 .update();
         if (!updated) {
-            log.warn("MySQL 库存回补跳过（券不存在或已达总库存），voucherId={}", voucherId);
+            // 不能提交“订单已取消但未回补/无事件”的半完成状态。
+            throw new IllegalStateException("MySQL 库存回补失败，取消事务回滚，orderId="
+                    + order.getId() + ", voucherId=" + voucherId);
         }
-
-        if (!updated) {
-            return;
-        }
-        // Redis 网络调用放到提交之后；回滚不能把库存提前释放给下一位用户。
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    restoreRedisStock(voucherId, totalStock);
-                }
-            });
-        } else {
-            restoreRedisStock(voucherId, totalStock);
-        }
-    }
-
-    private void restoreRedisStock(Long voucherId, Integer totalStock) {
-        // 失败保留告警，使用现有对账修复流程处理；不能回滚已经提交的订单状态。
-        try {
-            Long result = stringRedisTemplate.execute(
-                    RESTORE_STOCK_SCRIPT,
-                    Collections.singletonList(SECKILL_STOCK_KEY + voucherId),
-                    String.valueOf(totalStock == null ? 0 : totalStock));
-            if (result == null || result == 0L) {
-                log.warn("Redis 库存回补跳过（key 不存在或已达总库存），voucherId={}", voucherId);
-            }
-        } catch (Exception e) {
-            log.error("Redis 库存回补失败，等待对账任务收敛，voucherId={}", voucherId, e);
-        }
+        SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
+        stockRestoreOutboxService.createEvent(order.getId(), voucherId, voucher.getTotalStock());
     }
 
     /**

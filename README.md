@@ -11,7 +11,7 @@ LocalPerks 是一个本地生活服务项目：用户可以查找附近商铺、
 | 用户 | 手机验证码登录、Redis 登录态、登出、签到及连续签到统计 |
 | 商铺 | 分类、详情缓存、名称搜索、附近商铺 |
 | 优惠券 | 发券、优惠券查询、Lua 秒杀资格判断 |
-| 订单 | 事务消息异步下单、A/B 两种写策略、延迟关单、支付、核销、退款、定时对账 |
+| 订单 | 事务消息异步下单、A/B 两种写策略、延迟关单、库存回补发件箱、支付、核销、退款、定时对账 |
 | 内容 | 探店笔记、热门列表、点赞、评论（发布 / 回复 / 点赞 / 删除，游客可读） |
 | 社交 | 关注、共同关注、关注动态滚动分页 |
 | 智能助手 | 独立服务 EchoMind：工具调用、写操作审批、多专家协作、长期记忆、SSE 流式 |
@@ -42,6 +42,7 @@ Java 8 · Spring Boot 2.3.12 · MyBatis-Plus 3.4.3 · Spring Data Redis 2.6.2 ·
 3. 在同一个库上导入交易链路增量脚本 src/main/resources/db/V2__trade.sql，它会补上
    `(user_id, voucher_id)` 唯一索引、关单扫描索引和库存对账用的 `total_stock` 列。
    评论功能还需导入 `src/main/resources/db/V3__comment.sql`。
+   库存回补发件箱还需手动导入 `src/main/resources/db/V4__stock_restore_outbox.sql`，必须先建表再启动新版应用；项目不会自动迁移。
 4. 参考 .env.example，在终端或 IDE 中配置 DB_PASSWORD、DB_USER、DB_URL 和 REDIS_HOST、REDIS_PORT、REDIS_PASSWORD。应用不会自动读取 .env 文件。
 5. 启动 RocketMQ 的 NameServer 与 Broker，步骤见 [deploy/rocketmq/README.md](deploy/rocketmq/README.md)：
 
@@ -84,9 +85,14 @@ New-Item -ItemType Directory -Force nginx-1.18.0/logs, nginx-1.18.0/temp
 
 `trade.close-delay-level` 是延迟关单的 RocketMQ 延迟级别（4.x 只有 18 个固定档位，16 表示 30 分钟），
 本地演示改成 `3`（10 秒）即可快速观察自动关单；`trade.reconcile-cron` 控制对账任务频率，
-对账以订单表为账本校正 Redis 与 MySQL 库存并兜底补关单。
+对账以订单表为账本发现库存差异并兜底补关单。
 
-库存对账默认只观测差异（`trade.reconcile.auto-fix=false`）；修复模式仅供暂停活动并排空交易后使用。
+取消与超时关单在同一事务内回补 MySQL 并写库存回补事件，后台通过 RocketMQ 投递，由 Lua 按事件去重回补 Redis。
+`trade.stock-restore.enabled=false` 只暂停后台发送，事件仍落库且已有消息继续消费。
+部署顺序、重试状态与故障处理见 [库存回补发件箱](docs/stock-restore-outbox.md)。
+
+库存对账默认只观测差异（`trade.reconcile.auto-fix=false`）；Redis 始终只观测，避免与异步事件重复回补。
+该开关仅控制维护窗口内的 MySQL 修复，开启前必须暂停全部交易写入并排空消息。
 管理端库存预热会原子检查 Redis 占用与库存快照；已有任何订单记录的券，即使 Redis 库存键丢失或
 传入 `force=true` 也拒绝重置，需走暂停活动、核对账本的维护流程，保留终身一单资格。
 
@@ -108,6 +114,10 @@ mvn "-Dtest=ShopCacheLookupTest,ShopBloomFilterTest" test
 # 连接 application-test.yaml 指定的 Redis，仅操作随机测试键并清理
 $env:RUN_REDIS_SCRIPT_TESTS = 'true'
 mvn -Dtest=StockWarmupScriptTest test
+# 库存回补发送/消费故障单元测试，无外部依赖
+mvn -Dtest=StockRestoreDeliveryTest test
+# 库存回补 Lua：需启用上面的 RUN_REDIS_SCRIPT_TESTS，连接独立 Redis
+mvn -Dtest=StockRestoreScriptTest test
 # 安装 Playwright 后运行浏览器回归；需要已安装 Chrome
 node --test tests/frontend-regression.cjs
 ~~~

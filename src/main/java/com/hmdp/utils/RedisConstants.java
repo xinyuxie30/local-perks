@@ -22,6 +22,8 @@ public class RedisConstants {
      * 秒杀剩余可售库存，入口预扣，单位个
      */
     public static final String SECKILL_STOCK_KEY = "seckill:stock:";
+    /** 库存回补事件幂等标记，不自动过期；与事件账本一起按维护流程归档。 */
+    public static final String SECKILL_STOCK_RESTORE_EVENT_KEY = "seckill:stock:restored:";
     /**
      * 已占用购买资格的用户集合，一人一单第一层防线
      */

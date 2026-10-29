@@ -46,14 +46,21 @@ deploy\rocketmq\start-broker.cmd
 
 | 用途 | Topic | 消费组 |
 | --- | --- | --- |
-| 秒杀下单 | `topic.seckill.order` | `cg.seckill.order` |
-| 延迟关单 | `topic.order.close` | `cg.order.close` |
+| 秒杀下单 | `topic-seckill-order` | `cg-seckill-order` |
+| 延迟关单 | `topic-order-close` | `cg-order-close` |
+| 库存回补事件 | `topic-stock-restore` | `cg-stock-restore` |
 
-消费失败会由 RocketMQ 自动重试（并发消费默认最多 16 次），超限后进入死信主题 `%DLQ%cg.seckill.order`。排查时用：
+消费失败会由 RocketMQ 自动重试（库存回补消费者配置最多 16 次），超限后进入相应消费组死信主题，例如
+`%DLQ%cg-seckill-order`、`%DLQ%cg-stock-restore`。库存回补还需监控数据库未完成事件与 `STOCK_RESTORE_ALERT` 日志。
+发送确认不等于库存回补完成，需检查发件箱事件是否为 `DONE`。
+排查时用：
 
 ```text
-%ROCKETMQ_HOME%\bin\mqadmin.cmd topicStatus -n 127.0.0.1:9876 -t topic.seckill.order
+%ROCKETMQ_HOME%\bin\mqadmin.cmd topicStatus -n 127.0.0.1:9876 -t topic-stock-restore
 ```
+
+库存回补需先导入 V4 事件表。部署切换、重试/死信排查和数据保留要求见
+[库存回补发件箱](../../docs/stock-restore-outbox.md)。
 
 ## 关于延迟级别
 

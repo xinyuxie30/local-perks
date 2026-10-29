@@ -43,6 +43,17 @@ trade:
   reconcile-cron: ${TRADE_RECONCILE_CRON:0 2/5 * * * ?}
   # 单次对账最多捞取的超时订单数，避免一次扫太多把内存和 DB 打满
   reconcile-batch-size: ${TRADE_RECONCILE_BATCH:100}
+  stock-restore:
+    # 先执行 V4__stock_restore_outbox.sql。关闭仅暂停投递，事件仍落库、消费者继续排空。
+    enabled: ${STOCK_RESTORE_ENABLED:true}
+    batch-size: 50
+    scan-delay-ms: 5000
+    lease-seconds: 30
+    ack-timeout-seconds: 120
+    retry-base-seconds: 5
+    retry-max-seconds: 300
+    max-send-attempts: 20
+    alert-age-seconds: 600
 app:
   http:
     # 与 Nginx upstream keepalive 配合；后端空闲超时略长于入口的 60 秒。

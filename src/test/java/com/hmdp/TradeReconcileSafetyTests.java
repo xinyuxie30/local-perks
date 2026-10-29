@@ -12,13 +12,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,22 +33,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>需要 MySQL 与 Redis 在运行（不依赖 MQ）。验收点：</p>
  * <ul>
  *   <li>观测模式（trade.reconcile.auto-fix=false，默认）：漂移只告警，Redis/MySQL 均不被覆盖；</li>
- *   <li>修复模式：无并发时按订单表重算值修复；CAS 脚本在旧值不匹配（期间有正常交易）时必须拒绝写入；</li>
+ *   <li>修复模式也不能覆盖 Redis，避免与发件箱回补叠加；仅允许维护窗口内修复 MySQL；</li>
  *   <li>force 预热：存在进行中的订单占用时拒绝覆盖 Redis 库存，排空后允许恢复。</li>
  * </ul>
  */
 @SpringBootTest
 @ActiveProfiles("test")
 class TradeReconcileSafetyTests {
-
-    /** 与 TradeReconcileTask 内部 CAS 脚本同款语义，用于直接验证「旧值不匹配绝不写入」 */
-    private static final DefaultRedisScript<Long> CAS_STOCK_SCRIPT = new DefaultRedisScript<>(
-            "local cur = redis.call('get', KEYS[1]) " +
-            "if cur == ARGV[1] then " +
-            "  redis.call('set', KEYS[1], ARGV[2]) " +
-            "  return 1 " +
-            "end " +
-            "return 0", Long.class);
 
     @Resource
     private TradeReconcileTask tradeReconcileTask;
@@ -115,39 +104,23 @@ class TradeReconcileSafetyTests {
     }
 
     @Test
-    void autoFixModeRepairsWhenStable() {
+    void autoFixMayRepairMysqlButMustNeverOverwriteRedis() {
         voucherId = createSeckillVoucher(10);
         Map<Long, String> redisSnapshot = snapshotRedisStocks();
         Map<Long, Integer> mysqlSnapshot = snapshotMysqlStocks();
         stringRedisTemplate.opsForValue().set(SECKILL_STOCK_KEY + voucherId, "5");
+        seckillVoucherService.update().set("stock", 3).eq("voucher_id", voucherId).update();
         try {
             ReflectionTestUtils.setField(tradeReconcileTask, "autoFix", true);
             runReconcileWithoutClosingOrders();
-            assertEquals("10", stringRedisTemplate.opsForValue().get(SECKILL_STOCK_KEY + voucherId),
-                    "修复模式在无并发时应把 Redis 库存收敛到按订单表重算值");
+            assertEquals("5", stringRedisTemplate.opsForValue().get(SECKILL_STOCK_KEY + voucherId),
+                    "即使开启 auto-fix 也不能与发件箱并行覆盖 Redis 库存");
             SeckillVoucher after = seckillVoucherService.getById(voucherId);
             assertEquals(10, after.getStock());
         } finally {
             ReflectionTestUtils.setField(tradeReconcileTask, "autoFix", false);
             restoreOtherVouchers(redisSnapshot, mysqlSnapshot);
         }
-    }
-
-    @Test
-    void casScriptMustRejectStaleOldValue() {
-        voucherId = createSeckillVoucher(10);
-        stringRedisTemplate.opsForValue().set(SECKILL_STOCK_KEY + voucherId, "5");
-        // 旧值不匹配：模拟「读到旧值之后库存又被正常交易扣减」的交错
-        Long rejected = stringRedisTemplate.execute(CAS_STOCK_SCRIPT,
-                Collections.singletonList(SECKILL_STOCK_KEY + voucherId), "7", "10");
-        assertEquals(0L, rejected, "旧值不匹配时 CAS 必须拒绝写入");
-        assertEquals("5", stringRedisTemplate.opsForValue().get(SECKILL_STOCK_KEY + voucherId),
-                "CAS 拒绝后库存不得被覆盖");
-        // 旧值匹配：安全修复
-        Long applied = stringRedisTemplate.execute(CAS_STOCK_SCRIPT,
-                Collections.singletonList(SECKILL_STOCK_KEY + voucherId), "5", "10");
-        assertEquals(1L, applied, "旧值匹配时 CAS 应完成修复");
-        assertEquals("10", stringRedisTemplate.opsForValue().get(SECKILL_STOCK_KEY + voucherId));
     }
 
     @Test

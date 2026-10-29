@@ -3,20 +3,19 @@ package com.hmdp.task;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
+import com.hmdp.mapper.StockRestoreEventMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.OrderStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -25,30 +24,15 @@ import static com.hmdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 
 /**
  * 交易对账：以 tb_voucher_order 为账本，收敛 Redis 与 MySQL 的库存漂移，并兜底补关单。
- * 主链路只保证「尽量不错」，错过的部分由这里收口。
+ * 回补事件负责可靠重试；本任务负责补关单与发现账本差异。
  *
- * <p>库存修复遵循「观测/修复分离」（审计 2026-10-18 P1-3）：默认 {@code trade.reconcile.auto-fix=false}
- * 只记录差异不做任何写入——异步订单落库前的 Redis/DB 差异是正常现象，直接覆盖会吞掉正常扣减；
- * 确认活动暂停/排空后再显式开启 auto-fix。修复写入本身也是安全的：
- * Redis 用 CAS（Lua 内比较旧值，不匹配即放弃），MySQL 用带旧值条件的 UPDATE——
- * 从读到写之间只要库存又被扣减/回补，修复就会放弃并留待下一轮。</p>
+ * <p>Redis 始终只观测：取消事务可以在检查发件箱后提交，此时 Redis 尚未变化，
+ * CAS 也无法阻止“对账先加一、回补消息再加一”。维护重建必须停止全部交易写入与消息处理。
+ * {@code trade.reconcile.auto-fix} 仅控制 MySQL 条件修复，默认 false，仍要求暂停/排空。</p>
  */
 @Slf4j
 @Component
 public class TradeReconcileTask {
-
-    /**
-     * Redis 库存 CAS 修复：仅当当前值仍等于对账读到的旧值时才写入重算值。
-     * 秒杀扣减（seckill.lua）与取消回补（restore_stock.lua）都会原子地改动库存键，
-     * 因此「读旧值 → CAS」之间任何一笔正常交易都会让 CAS 失败，绝不覆盖正常扣减。
-     */
-    private static final DefaultRedisScript<Long> CAS_STOCK_SCRIPT = new DefaultRedisScript<>(
-            "local cur = redis.call('get', KEYS[1]) " +
-            "if cur == ARGV[1] then " +
-            "  redis.call('set', KEYS[1], ARGV[2]) " +
-            "  return 1 " +
-            "end " +
-            "return 0", Long.class);
 
     /**
      * 未支付订单的持有时间，需与 trade.close-delay-level 表示的时间口径一致
@@ -63,7 +47,7 @@ public class TradeReconcileTask {
     private int batchSize;
 
     /**
-     * 是否允许对账自动修复库存漂移（默认 false 只观测）。
+     * 是否允许对账自动修复 MySQL 库存漂移（默认 false 只观测）。Redis 不再自动覆盖。
      * 开启前应确认活动已暂停/排空：落库延迟造成的短暂差异属于正常现象
      */
     @Value("${trade.reconcile.auto-fix:false}")
@@ -82,6 +66,9 @@ public class TradeReconcileTask {
 
     @Resource
     private VoucherOrderMapper voucherOrderMapper;
+
+    @Resource
+    private StockRestoreEventMapper stockRestoreEventMapper;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -138,6 +125,16 @@ public class TradeReconcileTask {
                 continue;
             }
             String redisStock = stringRedisTemplate.opsForValue().get(SECKILL_STOCK_KEY + voucherId);
+            long incompleteRestores = stockRestoreEventMapper.countIncompleteForVoucher(voucherId);
+            // 发件箱尚未完成时，账面已取消数可能尚未反映在 Redis；不能先补一遍再让消息补一遍。
+            if (incompleteRestores > 0) {
+                log.warn("库存回补事件尚未完成，禁止对账覆盖 Redis，voucherId={}，incomplete={}",
+                        voucherId, incompleteRestores);
+            }
+            if (redisStock == null) {
+                log.error("STOCK_RESTORE_ALERT Redis 库存键缺失，voucherId={}，请暂停活动并核对账本与回补事件；不自动重建",
+                        voucherId);
+            }
             if (redisStock != null) {
                 long occupied = sizeOf(SECKILL_ORDER_KEY + voucherId);
                 long canceled = voucherOrderService.query()
@@ -146,24 +143,9 @@ public class TradeReconcileTask {
                         .count();
                 long expectedRedisStock = voucher.getTotalStock() - occupied + canceled;
                 if (Long.parseLong(redisStock) != expectedRedisStock) {
-                    if (!autoFix) {
-                        // 观测模式：落库延迟等短暂差异是正常现象，不做任何写入（防止覆盖正常扣减）
-                        log.warn("Redis 库存漂移（观测模式不修复），voucherId={}，实际={}，按订单表重算应为={}；"
-                                        + "确认活动暂停/排空后可设置 trade.reconcile.auto-fix=true",
-                                voucherId, redisStock, expectedRedisStock);
-                    } else {
-                        // 修复模式：CAS 原子修复——旧值不匹配说明期间又有正常交易，放弃留待下轮
-                        Long fixed = stringRedisTemplate.execute(CAS_STOCK_SCRIPT,
-                                Collections.singletonList(SECKILL_STOCK_KEY + voucherId),
-                                redisStock, String.valueOf(expectedRedisStock));
-                        if (fixed != null && fixed == 1L) {
-                            log.info("Redis 库存已按订单表修复，voucherId={}，{} -> {}",
-                                    voucherId, redisStock, expectedRedisStock);
-                        } else {
-                            log.warn("Redis 库存修复放弃（对账期间库存又被交易改动），voucherId={}，读到的旧值={} 已失效，留待下轮",
-                                    voucherId, redisStock);
-                        }
-                    }
+                    log.warn("Redis 库存差异（只观测不修复），voucherId={}，实际={}，账本最终预期={}，未完成回补={}；"
+                                    + "先排查在途下单与回补事件，维护重建必须暂停全部交易写入及消息处理",
+                            voucherId, redisStock, expectedRedisStock, incompleteRestores);
                 }
             }
 

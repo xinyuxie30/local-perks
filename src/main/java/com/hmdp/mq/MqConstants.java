@@ -14,4 +14,8 @@ public class MqConstants {
      */
     public static final String ORDER_CLOSE_TOPIC = "topic-order-close";
     public static final String ORDER_CLOSE_GROUP = "cg-order-close";
+
+    /** 关单成功之后的库存回补事件，与触发关单的延迟消息分开。 */
+    public static final String STOCK_RESTORE_TOPIC = "topic-stock-restore";
+    public static final String STOCK_RESTORE_GROUP = "cg-stock-restore";
 }
