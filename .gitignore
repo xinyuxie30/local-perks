@@ -49,3 +49,8 @@ publish-prep/
 
 # WorkBuddy assistant workspace (session logs, memory, tmp)
 .workbuddy/
+
+# Isolated load-test processes, database files and generated local credentials
+/tmp/
+/output/
+/tests/__pycache__/
