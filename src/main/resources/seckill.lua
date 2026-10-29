@@ -36,4 +36,6 @@ redis.call('incrby', stockKey, -1)
 redis.call('sadd', orderKey, userId)
 -- 3.6.写事务标记，Broker 回查时据此决定半消息提交还是回滚
 redis.call('set', txKey, 'COMMIT', 'EX', 1800)
+-- 只有已成功预扣的请求才保留排队状态直到消费终态；未发送/被拒绝的标记仍可过期。
+redis.call('persist', 'seckill:queue:' .. orderId)
 return 0

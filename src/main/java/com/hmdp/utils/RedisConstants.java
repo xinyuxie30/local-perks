@@ -36,7 +36,7 @@ public class RedisConstants {
      */
     public static final Long SECKILL_TX_TTL = 1800L;
     /**
-     * 排队状态，订单落库前供前端轮询，单位分钟
+     * 排队状态供前端轮询。TTL 仅用于未受理/失败状态；成功预扣后 PERSIST，消费终态清理。
      */
     public static final String SECKILL_QUEUE_KEY = "seckill:queue:";
     public static final String SECKILL_QUEUE_PENDING = "PENDING";

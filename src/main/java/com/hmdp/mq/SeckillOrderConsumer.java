@@ -2,7 +2,6 @@ package com.hmdp.mq;
 
 import com.hmdp.config.SeckillProperties;
 import com.hmdp.dto.SeckillOrderMessage;
-import com.hmdp.service.IVoucherOrderService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
@@ -35,7 +34,7 @@ public class SeckillOrderConsumer implements RocketMQListener<SeckillOrderMessag
     }
 
     @Resource
-    private IVoucherOrderService voucherOrderService;
+    private OrderPersistenceBatcher orderPersistenceBatcher;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -57,10 +56,10 @@ public class SeckillOrderConsumer implements RocketMQListener<SeckillOrderMessag
                 return;
             }
             // 返回 2 表示该用户已在占用集合里，可能是重复消息或上一次消费重试：
-            // 不在这里拦，交给数据库的「先查 + 唯一索引」兜底，避免重试把订单丢掉
+            // 不在这里拦，交给数据库唯一索引兜底，避免重试把订单丢掉
         }
         // 幂等落库。抛异常则 MQ 重试，重复投递时内部会识别并跳过
-        voucherOrderService.createOrder(message);
+        orderPersistenceBatcher.createOrder(message);
         // 落库成功：清掉排队状态，并投递延迟关单消息
         stringRedisTemplate.delete(SECKILL_QUEUE_KEY + message.getOrderId());
         seckillOrderProducer.sendCloseDelayMessage(message);

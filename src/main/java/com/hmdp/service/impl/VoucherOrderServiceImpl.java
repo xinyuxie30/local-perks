@@ -21,8 +21,6 @@ import com.hmdp.vo.OrderVO;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.client.producer.LocalTransactionState;
 import org.apache.rocketmq.client.producer.TransactionSendResult;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -31,6 +29,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.NoTransactionException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
@@ -66,9 +66,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private RedisIdWorker redisIdWorker;
 
     @Resource
-    private RedissonClient redissonClient;
-
-    @Resource
     private StringRedisTemplate stringRedisTemplate;
 
     @Resource
@@ -96,13 +93,15 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         // 2.生成全局唯一订单id，同时作为订单主键，重复投递会撞主键
         long orderId = redisIdWorker.nextId("order");
-        // 3.标记排队中，订单落库后由消费者删除，前端据此轮询。
+        // 3.尚未发送的临时标记有 TTL；模式 A 的 Lua 在库存预扣成功时原子 PERSIST。
+        // 已受理的排队状态由消费者终态清理，不能因排队超过十分钟而消失。
         // 值里带上 userId（PENDING:<userId>），供状态查询接口做归属校验
         stringRedisTemplate.opsForValue().set(SECKILL_QUEUE_KEY + orderId,
                 SECKILL_QUEUE_PENDING + ":" + userId,
                 SECKILL_QUEUE_TTL, TimeUnit.MINUTES);
 
         if (seckillProperties.isClaimInConsumer()) {
+            stringRedisTemplate.persist(SECKILL_QUEUE_KEY + orderId);
             // 模式 B：入口不碰库存，只排队投递，库存扣减下移到消费者
             try {
                 seckillOrderProducer.sendOrderMessage(new SeckillOrderMessage(orderId, userId, voucherId));
@@ -151,19 +150,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         Long userId = message.getUserId();
         Long voucherId = message.getVoucherId();
-        // 第二层防线：同一用户的消息串行处理。锁在事务提交前释放，极端情况下仍可能漏进来，
-        // 所以真正兜底的是订单主键与 uk_user_voucher 唯一索引
-        RLock lock = redissonClient.getLock(LOCK_ORDER_KEY + userId);
-        if (!lock.tryLock()) {
-            // 抛出让 RocketMQ 稍后重试，而不是静默丢弃
-            throw new IllegalStateException("订单正在处理中，稍后重试：" + message.getOrderId());
-        }
         try {
-            int count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
-            if (count > 0) {
-                log.info("该用户已购买过该券，幂等跳过，orderId={}", message.getOrderId());
-                return;
-            }
+            // 先插入订单，唯一索引负责并发幂等；不再先查 count 或持有 Redis 用户锁。
+            // 最后才更新热点库存行，随后立即提交，缩短同券所有订单串行等待的区间。
+            VoucherOrder order = new VoucherOrder();
+            order.setId(message.getOrderId());
+            order.setUserId(userId);
+            order.setVoucherId(voucherId);
+            order.setPayType(1);
+            order.setStatus(OrderStatus.UNPAID);
+            save(order);
             boolean deducted = seckillVoucherService.update()
                     .setSql("stock = stock - 1")
                     .eq("voucher_id", voucherId)
@@ -173,20 +169,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 // 让 MQ 重试，重试耗尽后进死信队列，由对账任务收口
                 throw new IllegalStateException("数据库库存不足，voucherId=" + voucherId);
             }
-            VoucherOrder order = new VoucherOrder();
-            order.setId(message.getOrderId());
-            order.setUserId(userId);
-            order.setVoucherId(voucherId);
-            order.setPayType(1);
-            order.setStatus(OrderStatus.UNPAID);
-            save(order);
         } catch (DuplicateKeyException e) {
-            // 重复投递，被主键或唯一索引拦下，视为已处理。
-            // 关键：本事务已经执行过 stock-1，必须把整个事务回滚，否则重复消息会多扣一次库存
+            // 插入冲突时尚未扣库存，回滚本次事务；重投不能再次扣减。
             markRollbackOnly();
             log.info("订单已存在，幂等忽略并回滚本次扣减，orderId={}", message.getOrderId());
-        } finally {
-            lock.unlock();
         }
     }
 
@@ -238,7 +224,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         String queued = stringRedisTemplate.opsForValue().get(SECKILL_QUEUE_KEY + orderId);
         if (queued == null) {
-            // 排队标记已删除或过期，且订单未落库：状态不含归属信息，保持 NOT_FOUND 语义
+            // 消费者可能恰好在第一次 SQL 查询之后提交并删除标记，必须再读一次。
+            VoucherOrder committed = getById(orderId);
+            if (committed != null) {
+                if (!me.equals(committed.getUserId())) {
+                    return Result.fail("订单不存在");
+                }
+                vo.setState("CREATED");
+                vo.setStatus(committed.getStatus());
+                return Result.ok(vo);
+            }
             vo.setState("NOT_FOUND");
             return Result.ok(vo);
         }
@@ -417,7 +412,24 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             log.warn("MySQL 库存回补跳过（券不存在或已达总库存），voucherId={}", voucherId);
         }
 
-        // Redis 只是缓存：失败不影响业务状态，交给对账任务收敛
+        if (!updated) {
+            return;
+        }
+        // Redis 网络调用放到提交之后；回滚不能把库存提前释放给下一位用户。
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    restoreRedisStock(voucherId, totalStock);
+                }
+            });
+        } else {
+            restoreRedisStock(voucherId, totalStock);
+        }
+    }
+
+    private void restoreRedisStock(Long voucherId, Integer totalStock) {
+        // 失败保留告警，使用现有对账修复流程处理；不能回滚已经提交的订单状态。
         try {
             Long result = stringRedisTemplate.execute(
                     RESTORE_STOCK_SCRIPT,
