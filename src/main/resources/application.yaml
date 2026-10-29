@@ -44,6 +44,10 @@ trade:
   # 单次对账最多捞取的超时订单数，避免一次扫太多把内存和 DB 打满
   reconcile-batch-size: ${TRADE_RECONCILE_BATCH:100}
 app:
+  http:
+    # 与 Nginx upstream keepalive 配合；后端空闲超时略长于入口的 60 秒。
+    keep-alive-requests: ${HTTP_KEEP_ALIVE_REQUESTS:10000}
+    keep-alive-timeout-ms: ${HTTP_KEEP_ALIVE_TIMEOUT_MS:65000}
   admin:
     # 管理端接口白名单，逗号分隔的用户id；默认测试账号 1011
     user-ids: ${ADMIN_USER_IDS:1011}
