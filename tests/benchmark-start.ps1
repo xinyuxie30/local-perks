@@ -50,7 +50,7 @@ autoCreateTopicEnable=true
 autoCreateSubscriptionGroup=true
 storePathRootDir=$store
 storePathCommitLog=$store/commitlog
-mapedFileSizeCommitLog=67108864
+mappedFileSizeCommitLog=67108864
 diskMaxUsedSpaceRatio=95
 "@ | Set-Content "$run\broker.conf" -Encoding ascii
 'listenPort=19876' | Set-Content "$run\namesrv.conf" -Encoding ascii

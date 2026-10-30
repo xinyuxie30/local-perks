@@ -27,6 +27,10 @@ JDK、Maven、Python、Node、MySQL、Nginx、RocketMQ 路径与端口。
 - [L1 缓存配对测试](../output/benchmarks/localperks-cache-ab-2026-10-28/REPORT.md)
 - [库存回补发件箱回归](../output/validation/stock-restore-2026-10-29/REPORT.md)
 
-仓库仅收录这些文本报告；原始请求样本、数据库与消息存储、JAR、完整日志和其他本地产物
-保留在 `tmp/`、`output/`，默认不入库。报告中的原始数据引用因此需要本地归档才能打开。
+2026-10-30 按用户要求清理了隔离压测数据库、Redis 持久化、消息存储、旧 JAR、原始请求
+和完整日志；`output/benchmarks/` 及上述 validation 目录仅保留过程与结果 Markdown 文档。
+操作过程见 `output/benchmarks/压测操作过程.md`，汇总见 `output/benchmarks/压测结果汇总.md`。
+报告中的历史原始数据路径已不可用，不能直接重跑依赖旧 JAR/环境的历史脚本。
+`benchmark-start.ps1` 的 RocketMQ 参数现已修正为 `mappedFileSizeCommitLog=67108864`；
+历史误写的 `mapedFileSizeCommitLog` 未生效，实际按默认 1 GiB 预分配，不能把历史结果当作 64 MiB 配置。
 性能结果对应报告记录的历史版本和环境，不能当作后续所有代码版本的性能保证。
