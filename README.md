@@ -1,135 +1,169 @@
 # 智惠生活通 · LocalPerks
 
-LocalPerks 是一个本地生活服务项目：用户可以查找附近商铺、分享探店笔记、关注其他用户，也可以领取优惠券并查看自己的订单。
+一个把附近商铺、探店分享和优惠券放在一起的本地生活平台，基于 Spring Boot、Redis 和 RocketMQ 构建。
 
-项目同时展示优惠券秒杀和异步订单处理的实现，适合了解 Spring Boot、Redis 和 RocketMQ 如何协作。当前支付是模拟流程，验证码输出在开发日志中。
+你可以在这里找店、看探店笔记、参与优惠券秒杀，也可以关注喜欢的作者，看看他们最近去了哪里。项目还接入了智能助手 EchoMind，让查店、找优惠和查询订单多一个对话入口。
 
-## 功能
+## 能做什么
 
-| 模块 | 功能 |
-| --- | --- |
-| 用户 | 手机验证码登录、Redis 登录态、登出、签到及连续签到统计 |
-| 商铺 | 分类、详情缓存、名称搜索、附近商铺 |
-| 优惠券 | 发券、优惠券查询、Lua 秒杀资格判断 |
-| 订单 | 事务消息异步下单、A/B 两种写策略、延迟关单、库存回补发件箱、支付、核销、退款、定时对账 |
-| 内容 | 探店笔记、热门列表、点赞、评论（发布 / 回复 / 点赞 / 删除，游客可读） |
-| 社交 | 关注、共同关注、关注动态滚动分页 |
-| 智能助手 | 独立服务 EchoMind：工具调用、写操作审批、多专家协作、长期记忆、SSE 流式 |
+### 找一家想去的店
 
-## 智能助手（EchoMind）
+按分类浏览商铺，搜索店名，或根据当前位置查找附近的店。商铺列表支持距离、人气、评分等排序，详情页可以查看店铺信息和在售优惠券。
 
-EchoMind 是需要单独部署的服务，本仓库包含助手页面和 Nginx 代理配置，不包含该服务的完整代码；下述能力取决于实际部署的版本。
+### 看看大家怎么逛
 
-`nginx-1.18.0/html/hmdp/chat.html` 是助手控制台（对话 / 功能 / 专家 / 记忆四个面板），
-能力由独立服务 EchoMind 提供，默认跑在 `18080`，通过 Nginx 的 `/cs-api` 反代接入。
+浏览热门探店笔记，发布自己的图文内容，给笔记点赞、发表评论或回复。遇到感兴趣的作者可以关注，在关注动态里继续看他们的新分享，也能查看彼此的共同关注。
 
-- 真 Agent Loop：模型自主选工具 → 参数校验 → 执行 → 结果回填 → 再请求，带轮次上限、总超时、同参去重、失败降级。
-- 写操作 HITL：抢券、支付、取消、核销、退款、签到都要前端二次确认后才执行。
-- 多 Agent：`delegate_task` 可把检索类子任务派给「导购顾问 / 内容推荐官 / 订单专员」，子 Agent 只读、上下文隔离、只回摘要。
-- 上下文与记忆：预算内保留历史，超限做 LLM 摘要压缩；长期记忆按用户隔离存放在 `data/memory/<userId>/`。
-- 按需技能与知识库：技能索引常驻、正文按需 `load_skill`；平台规则类问题走 `search_knowledge`。
+### 抢一张优惠券
 
-接口：`/cs-api/chat/agent`、`/cs-api/chat/agent/stream`（SSE）、`/cs-api/chat/approve`、`/cs-api/agents`、`/cs-api/memory`。
+在商铺详情页参与限时优惠券秒杀，提交后查看排队和下单结果。订单支持支付、取消、核销和退款；未支付的订单会在超时后自动关闭，并回补库存。
+
+支付和退款目前采用模拟实现，方便在本地体验交易流程，尚未对接真实支付渠道。
+
+### 和助手聊聊需求
+
+智能助手页面提供对话、功能入口、专家和记忆四个面板。接入 EchoMind 后，可以通过对话查询商铺、优惠券和订单，并结合个人偏好继续交流。涉及抢券、支付、取消等操作时，会先展示确认卡片，由用户确认后执行。
+
+EchoMind 是独立服务。本仓库提供助手前端和 Nginx 接入配置，助手后端需要另外部署。
+
+此外，项目支持手机验证码登录、个人资料编辑、每日签到和连续签到统计。当前验证码输出到后端开发日志，未接入短信服务。
+
+## 关键设计
+
+本地生活平台既有大量的商铺浏览，也有抢券时集中的交易请求。项目围绕这两类访问，以及后续的订单处理，做了以下设计。
+
+### 商铺查询：让重复访问尽量走缓存
+
+商铺详情优先读取 Caffeine 本地缓存，再查询 Redis，最后访问 MySQL。对不存在的商铺 ID，使用布隆过滤器和空值缓存减少无效数据库查询；布隆过滤器不可用时回退到常规查询。商铺信息更新后，在数据库事务提交后清理缓存，并通知其他实例清理本地缓存。
+
+附近商铺使用 Redis GEO 按距离检索。登录态、签到、点赞和关注关系也分别使用 Redis 的不同数据结构处理。
+
+### 优惠券秒杀：先受理请求，再异步生成订单
+
+默认模式下，Redis Lua 原子检查库存和一人一单资格，RocketMQ 事务消息将库存预扣与下单消息关联起来，消费者再异步写入 MySQL。消息重复投递时，通过订单主键和用户、优惠券唯一索引避免重复创建订单。
+
+项目也提供消费端扣库存模式，可通过 `SECKILL_MODE=B` 切换：入口负责排队和发送消息，库存与资格由消费者认领。两种模式用于比较不同的请求处理方式，默认使用 `A`。
+
+### 订单处理：取消之后，库存也要跟上
+
+支付、取消、核销和退款通过订单状态校验控制流转，支付与超时关单并发时使用条件更新处理竞争。
+
+取消或超时关闭订单时，MySQL 库存回补和回补事件在同一事务中保存。后台通过 RocketMQ 投递事件，由 Lua 去重后回补 Redis 库存；发送或消费失败可以重试。定时对账用于发现库存差异，并补充处理遗漏的超时订单。
+
+这条链路采用至少一次投递与业务幂等，详细机制见[库存回补说明](docs/stock-restore-outbox.md)。
+
+### 智能助手：连接业务，也保留用户确认
+
+接入的 EchoMind 服务支持工具调用、多专家协作、上下文压缩和按用户保存长期记忆。助手可以按需查询平台规则，或将检索任务交给导购、内容推荐和订单专家，再汇总回答。前端通过 SSE 展示流式回复和执行进度，写操作统一经过用户确认。
+
+## 系统结构
+
+```mermaid
+flowchart LR
+    User[用户] --> Web[Web 页面 / Nginx]
+    Web --> API[Spring Boot 业务服务]
+    API --> Cache[Caffeine / Redis]
+    API --> DB[(MySQL)]
+    API --> MQ[RocketMQ]
+    MQ --> Worker[下单 / 关单 / 库存回补消费者]
+    Worker --> DB
+    Worker --> Cache
+    Web --> Assistant[EchoMind 独立助手服务]
+    Assistant --> API
+```
 
 ## 技术栈
 
-Java 8 · Spring Boot 2.3.12 · MyBatis-Plus 3.4.3 · Spring Data Redis 2.6.2 · Redisson 3.13.6 · RocketMQ 4.9.x · MySQL · Vue · Element UI · Nginx
+| 层次 | 技术 | 用途 |
+| --- | --- | --- |
+| 后端 | Java 8、Spring Boot 2.3.12、MyBatis-Plus 3.4.3 | 业务接口、数据访问、事务处理 |
+| 数据与缓存 | MySQL、Redis 6.2+、Caffeine、Redisson | 业务数据、多级缓存、GEO 检索、登录态与并发控制 |
+| 消息队列 | RocketMQ 4.9.x | 异步下单、事务消息、延迟关单、库存回补 |
+| 前端 | Vue、Element UI、HTML / CSS / JavaScript | 商铺、社区、订单和助手页面 |
+| 接入 | Nginx、SSE | 静态资源、API 反向代理、助手流式响应 |
 
-## 运行
+## 本地运行
 
-1. 准备 JDK 8、Maven 3、MySQL、Redis 6.2+ 和 RocketMQ 4.9.x。
-2. 创建 hmdp 开发数据库，导入 src/main/resources/db/hmdp.sql。脚本会重建同名表。
-3. 在同一个库上导入交易链路增量脚本 src/main/resources/db/V2__trade.sql，它会补上
-   `(user_id, voucher_id)` 唯一索引、关单扫描索引和库存对账用的 `total_stock` 列。
-   评论功能还需导入 `src/main/resources/db/V3__comment.sql`。
-   库存回补发件箱还需手动导入 `src/main/resources/db/V4__stock_restore_outbox.sql`，必须先建表再启动新版应用；项目不会自动迁移。
-4. 参考 .env.example，在终端或 IDE 中配置 DB_PASSWORD、DB_USER、DB_URL 和 REDIS_HOST、REDIS_PORT、REDIS_PASSWORD。应用不会自动读取 .env 文件。
-5. 启动 RocketMQ 的 NameServer 与 Broker，步骤见 [deploy/rocketmq/README.md](deploy/rocketmq/README.md)：
+### 1. 准备环境与数据库
 
-~~~text
-deploy\rocketmq\start-namesrv.cmd
-deploy\rocketmq\start-broker.cmd
-~~~
+需要 JDK 8、Maven 3、MySQL、Redis 6.2+、RocketMQ 4.9.x 和 Nginx。前端依赖随仓库提供，无需额外执行 npm 构建。
 
-6. 从项目根目录启动后端：
+创建 `hmdp` 数据库，按顺序导入以下脚本：
 
-~~~powershell
+| 脚本 | 内容 |
+| --- | --- |
+| [hmdp.sql](src/main/resources/db/hmdp.sql) | 基础表与示例数据 |
+| [V2__trade.sql](src/main/resources/db/V2__trade.sql) | 交易字段、唯一索引与库存对账字段 |
+| [V3__comment.sql](src/main/resources/db/V3__comment.sql) | 评论相关表 |
+| [V4__stock_restore_outbox.sql](src/main/resources/db/V4__stock_restore_outbox.sql) | 库存回补事件表 |
+
+`hmdp.sql` 会重建同名表，请在新建的开发库中导入。项目不会自动执行数据库迁移，以上脚本需要在启动前完成。
+
+### 2. 启动 Redis 与 RocketMQ
+
+启动 Redis，再启动 RocketMQ 的 NameServer 和 Broker。仓库提供了 Windows 启动脚本，使用前需要设置本机 RocketMQ 安装路径，具体见 [RocketMQ 启动说明](deploy/rocketmq/README.md)。
+
+分别在两个终端中运行：
+
+```powershell
+.\deploy\rocketmq\start-namesrv.cmd
+```
+
+```powershell
+.\deploy\rocketmq\start-broker.cmd
+```
+
+### 3. 配置并启动后端
+
+参考 [.env.example](.env.example)，在终端或 IDE 中设置环境变量。应用不会自动读取 `.env` 文件。
+
+在项目根目录执行，下面以 PowerShell 为例：
+
+```powershell
+$env:DB_USER = 'root'
 $env:DB_PASSWORD = '填写本机数据库密码'
+$env:DB_URL = 'jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC'
 $env:REDIS_HOST = '127.0.0.1'
 $env:REDIS_PORT = '6379'
-# Redis 开启认证时设置 REDIS_PASSWORD。
-# RocketMQ 不在本机时设置 ROCKETMQ_NAME_SERVER，默认 127.0.0.1:9876。
+$env:ROCKETMQ_NAME_SERVER = '127.0.0.1:9876'
+# Redis 开启认证时，还需设置 REDIS_PASSWORD。
 mvn spring-boot:run
-~~~
+```
 
-7. 单独安装 Nginx，使用仓库中的配置和前端资源。Windows 示例：
+后端默认监听 `8081` 端口。未支付订单默认在 30 分钟后关闭，相关参数见 [application.yaml](src/main/resources/application.yaml)。
 
-~~~powershell
+### 4. 启动前端
+
+单独安装 Nginx，使用仓库中的配置与静态资源。以下命令中的可执行文件路径需要替换为本机安装路径：
+
+```powershell
 New-Item -ItemType Directory -Force nginx-1.18.0/logs, nginx-1.18.0/temp
 & 'D:/tools/nginx/nginx.exe' -p "$PWD/nginx-1.18.0/" -c conf/nginx.conf
-~~~
+```
 
-前端地址：http://localhost:8080；后端端口：8081。Nginx 将 /api 请求转发到后端。
+浏览器打开 [http://localhost:8080](http://localhost:8080) 即可访问。Nginx 将业务请求转发到 `8081`；助手页面位于 [/chat.html](http://localhost:8080/chat.html)，默认通过 `/cs-api` 连接本机 `18080` 端口的 EchoMind 服务。
 
-图片默认保存到 nginx-1.18.0/html/hmdp/imgs，可通过 JVM 属性 hmdp.image-upload-dir 修改。附近商铺的 GEO 数据可通过 HmDianPingApplicationTests.loadShopData 导入开发环境。
+图片默认保存到 `nginx-1.18.0/html/hmdp/imgs`，可通过 JVM 属性 `hmdp.image-upload-dir` 修改。体验附近商铺前，可运行 `HmDianPingApplicationTests.loadShopData`，将开发库中的商铺坐标导入 Redis GEO。
 
-## 秒杀写策略与关单配置
+## 目录结构
 
-`seckill.mode` 决定入口和消费者谁负责扣库存：
+```text
+local-perks/
+├── src/main/java/com/hmdp/     # 业务接口、服务、缓存与消息处理
+├── src/main/resources/        # 配置、SQL 和 Redis Lua 脚本
+├── src/test/                  # Java 单元测试与集成测试
+├── nginx-1.18.0/
+│   ├── conf/                  # Nginx 配置
+│   └── html/hmdp/             # 业务前端与智能助手页面
+├── deploy/rocketmq/           # RocketMQ 本地启动配置
+├── tests/                     # 浏览器回归与压测工具
+├── docs/                      # 补充设计与维护文档
+├── .env.example               # 环境变量示例
+└── pom.xml
+```
 
-- `A`（默认）：入口执行 seckill.lua 预扣库存并占用资格，通过 RocketMQ 事务消息投递下单；
-  本地事务与半消息提交绑定，本地事务失败则半消息回滚。Lua 会写 `seckill:tx:{orderId}` 作为
-  Broker 回查依据，避免「库存已扣但消息丢了」。
-- `B`：入口只做排队并投递普通消息，库存扣减与一人一单下移到消费者里用 seckill_claim.lua 认领，
-  峰值从入口 Redis 热点转移到消费端（库存速率 = 消费速率）。
+## 补充说明
 
-`trade.close-delay-level` 是延迟关单的 RocketMQ 延迟级别（4.x 只有 18 个固定档位，16 表示 30 分钟），
-本地演示改成 `3`（10 秒）即可快速观察自动关单；`trade.reconcile-cron` 控制对账任务频率，
-对账以订单表为账本发现库存差异并兜底补关单。
+商铺和优惠券管理接口已有管理员校验，商家角色、门店归属与真实商家核销仍需进一步完善。智能助手的语音、多模态与外部知识库接入也不在当前实现范围内。
 
-取消与超时关单在同一事务内回补 MySQL 并写库存回补事件，后台通过 RocketMQ 投递，由 Lua 按事件去重回补 Redis。
-`trade.stock-restore.enabled=false` 只暂停后台发送，事件仍落库且已有消息继续消费。
-部署顺序、重试状态与故障处理见 [库存回补发件箱](docs/stock-restore-outbox.md)。
-
-库存对账默认只观测差异（`trade.reconcile.auto-fix=false`）；Redis 始终只观测，避免与异步事件重复回补。
-该开关仅控制维护窗口内的 MySQL 修复，开启前必须暂停全部交易写入并排空消息。
-管理端库存预热会原子检查 Redis 占用与库存快照；已有任何订单记录的券，即使 Redis 库存键丢失或
-传入 `force=true` 也拒绝重置，需走暂停活动、核对账本的维护流程，保留终身一单资格。
-
-## 构建
-
-~~~text
-mvn -DskipTests package
-~~~
-
-现有集成测试依赖 MySQL 和 Redis，部分测试会写入数据，请使用独立测试环境。
-
-新增模块回归可单独运行：
-
-~~~powershell
-# 不连接数据库、Redis 或 MQ 的预热服务单元测试
-mvn -Dtest=AdminWarmupTest test
-# 不连接外部服务的缓存链路与布隆降级回归（业务工程使用 JDK 8）
-mvn "-Dtest=ShopCacheLookupTest,ShopBloomFilterTest" test
-# 连接 application-test.yaml 指定的 Redis，仅操作随机测试键并清理
-$env:RUN_REDIS_SCRIPT_TESTS = 'true'
-mvn -Dtest=StockWarmupScriptTest test
-# 库存回补发送/消费故障单元测试，无外部依赖
-mvn -Dtest=StockRestoreDeliveryTest test
-# 库存回补 Lua：需启用上面的 RUN_REDIS_SCRIPT_TESTS，连接独立 Redis
-mvn -Dtest=StockRestoreScriptTest test
-# 安装 Playwright 后运行浏览器回归；需要已安装 Chrome
-node --test tests/frontend-regression.cjs
-~~~
-
-浏览器回归使用真实页面和模拟接口，覆盖连续审批、中文输入、会话隔离、SSE 分片、列表竞态与重试。
-可用 `PLAYWRIGHT_MODULE` 环境变量指定已有 Playwright 模块路径；它不能替代真实模型和交易链路验收。
-
-后端改进、前置知识与 Claude Code 执行契约的对应关系见 [2026-10-19 后端与 Agent 复核](docs/backend-agent-review-2026-10-19.md)。
-
-## 待完善
-
-- 支付为模拟实现，未对接真实支付渠道；申请退款直接落到已退款，未经过「退款中」状态。
-- 商铺与优惠券管理写接口已有管理员校验；商家角色、门店归属与真实商家核销仍待建模。
-- 验证码仅输出到开发日志，未接短信通道。
-- 智能助手暂未接入语音与多模态，知识库为本地 JSON 存储。
+构建使用 `mvn -DskipTests package`。回归测试与压测工具见[测试说明](tests/README.md)，其中集成测试需要独立的 MySQL、Redis 等依赖环境。
